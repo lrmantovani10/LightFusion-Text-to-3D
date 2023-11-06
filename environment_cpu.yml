@@ -1,4 +1,4 @@
-name: lf
+name: text_to_3D_lfn
 channels:
   - conda-forge
   - defaults

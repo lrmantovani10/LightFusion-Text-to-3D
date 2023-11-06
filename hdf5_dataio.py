@@ -172,7 +172,7 @@ def get_num_instances(data_root):
         file = h5py.File(data_root, 'r')
         instances = list(file.keys())
     else:
-        instances = len(glob(os.path.join(data_root, "*/")))
+        instances = glob(os.path.join(data_root, "*/"))
     return len(instances)
 
 

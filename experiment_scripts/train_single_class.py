@@ -50,7 +50,10 @@ def sync_model(model):
 def multigpu_train(gpu, opt, cache):
     if opt.gpus > 1:
         dist.init_process_group(backend='nccl', init_method='tcp://localhost:1492', world_size=opt.gpus, rank=gpu)
-    torch.cuda.set_device(gpu)
+
+    # Ignore this line if CPU only
+    if torch.cuda.is_available():
+        torch.cuda.set_device(gpu)
 
     def create_dataloader_callback(sidelength, batch_size, query_sparsity):
         train_dataset = hdf5_dataio.SceneClassDataset(num_context=0, num_trgt=opt.num_trgt,
