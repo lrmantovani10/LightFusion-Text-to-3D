@@ -12,7 +12,6 @@ import skimage.measure
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import multiclass_dataio
 import hdf5_dataio
 
 from collections import defaultdict
@@ -26,7 +25,6 @@ from pathlib import Path
 
 p = configargparse.ArgumentParser()
 p.add_argument('--data_root', type=str, required=True)
-p.add_argument('--dataset', type=str, required=True)
 p.add_argument('--logging_root', type=str, default=config.results_root)
 p.add_argument('--checkpoint_path', required=True)
 p.add_argument('--experiment_name', type=str, required=True)
@@ -35,20 +33,11 @@ p.add_argument('--conditioning', type=str, default='hyper')
 p.add_argument('--max_num_instances', type=int, default=None)
 p.add_argument('--save_out_first_n', type=int, default=100, help='Only saves images of first n object instances.')
 p.add_argument('--img_sidelength', type=int, default=64, required=False)
-p.add_argument('--viewlist', type=str, default=None, required=False)
 
 opt = p.parse_args()
 
 state_dict = torch.load(opt.checkpoint_path)
 num_instances = state_dict['latent_codes.weight'].shape[0]
-
-if opt.viewlist is not None:
-    with open(opt.viewlist, "r") as f:
-        tmp = [x.strip().split() for x in f.readlines()]
-    viewlist = {
-        x[0] + "/" + x[1]: list(map(int, x[2:]))
-        for x in tmp
-    }
 
 model = models.LFAutoDecoder(num_instances=num_instances, latent_dim=256, parameterization='plucker', network=opt.network,
                              conditioning=opt.conditioning).cuda()
@@ -89,19 +78,11 @@ def get_psnr(p, trgt):
     return psnr, ssim
 
 print("Loading dataset")
-if opt.dataset == 'NMR':
-    dataset = multiclass_dataio.get_instance_datasets(opt.data_root, sidelen=opt.img_sidelength, dataset_type='test',
-                                                      max_num_instances=opt.max_num_instances)
-else:
-    dataset = hdf5_dataio.get_instance_datasets_hdf5(opt.data_root, sidelen=opt.img_sidelength,
-                                                     max_num_instances=opt.max_num_instances)
+dataset = hdf5_dataio.get_instance_datasets_hdf5(opt.data_root, sidelen=opt.img_sidelength,
+                                                    max_num_instances=opt.max_num_instances)
 log_dir = Path(opt.logging_root) / opt.experiment_name
 
-if opt.dataset == 'NMR':
-    class_psnrs = defaultdict(list)
-    class_counter = defaultdict(int)
-else:
-    psnrs = []
+psnrs = []
 
 with torch.no_grad():
     for i in range(len(dataset)):
@@ -110,14 +91,7 @@ with torch.no_grad():
         dummy_query = dataset[i][0]
         instance_name = dummy_query['instance_name']
 
-        if opt.dataset == 'NMR':
-            obj_class = int(dummy_query['class'].cpu().numpy())
-            obj_class = multiclass_dataio.class2string_dict[obj_class]
-
-            if class_counter[obj_class] < opt.save_out_first_n:
-                instance_dir = log_dir / f'{obj_class}' / f'{instance_name}'
-                instance_dir.mkdir(exist_ok=True, parents=True)
-        elif i < opt.save_out_first_n:
+        if i < opt.save_out_first_n:
             instance_dir = log_dir / f'{instance_name}'
             instance_dir.mkdir(exist_ok=True, parents=True)
 
@@ -130,59 +104,17 @@ with torch.no_grad():
             out_dict['gt_rgb'] = model_input['query']['rgb']
 
             is_context = False
-            if opt.viewlist is not None:
-                key = '/'.join((obj_class, instance_name))
-                if key in viewlist:
-                    if j in viewlist[key]:
-                        is_context = True
-                else:
-                    print(f'{key} not in viewlist')
-                    continue
-
-            # if opt.dataset != 'NMR' or not is_context:
             psnr, ssim = get_psnr(out_dict['rgb'], out_dict['gt_rgb'])
-            if opt.dataset == 'NMR':
-                if not is_context:
-                    class_psnrs[obj_class].append((psnr, ssim))
-            else:
-                psnrs.append((psnr, ssim))
+            psnrs.append((psnr, ssim))
 
-            if opt.dataset=='NMR' and class_counter[obj_class] < opt.save_out_first_n:
-                for k, v in out_dict.items():
-                    img = convert_image(v, k)
-                    if k == 'gt_rgb':
-                        cv2.imwrite(str(instance_dir / f"{j:06d}_{k}.png"), img)
-                    elif k == 'rgb':
-                        cv2.imwrite(str(instance_dir / f"{j:06d}.png"), img)
-            elif i < opt.save_out_first_n:
+            if i < opt.save_out_first_n:
                 img = convert_image(out_dict['gt_rgb'], 'rgb')
                 cv2.imwrite(str(instance_dir / f"{j:06d}_gt.png"), img)
                 img = convert_image(out_dict['rgb'], 'rgb')
                 cv2.imwrite(str(instance_dir / f"{j:06d}.png"), img)
 
-        if opt.dataset == 'NMR':
-            mean_dict = {}
-            for k, v in class_psnrs.items():
-                mean = np.mean(np.array(v), axis=0)
-                mean_dict[k] = f"{mean[0]:.3f} {mean[1]:.3f}"
-            print(mean_dict)
+        print(np.mean(np.array(psnrs), axis=0))
 
-            class_counter[obj_class] += 1
-        else:
-            print(np.mean(np.array(psnrs), axis=0))
-
-with open(os.path.join(log_dir, "results.txt"), "w") as out_file:
-    if opt.dataset == 'NMR':
-        out_file.write(' & '.join(class_psnrs.keys()) + '\n')
-
-        psnrs, ssims = [], []
-        for value in class_psnrs.values():
-            mean = np.mean(np.array(value), axis=0)
-            psnrs.append(mean[0])
-            ssims.append(mean[1])
-
-        out_file.write(' & '.join(map(lambda x: f"{x:.3f}", psnrs)) + '\n')
-        out_file.write(' & '.join(map(lambda x: f"{x:.3f}", ssims)) + '\n')
-    else:
-        mean = np.mean(psnrs, axis=0)
-        out_file.write(f"{mean[0]} PSRN {mean[1]} SSIM")
+with open(os.path.join(log_dir, "results.txt"), "w") as out_file:    
+    mean = np.mean(psnrs, axis=0)
+    out_file.write(f"{mean[0]} PSRN {mean[1]} SSIM")

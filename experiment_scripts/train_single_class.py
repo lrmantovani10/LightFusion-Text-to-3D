@@ -1,10 +1,13 @@
 # Enable import from parent package
+from glob import iglob
 import sys
 import os
-sys.path.append( os.path.dirname( os.path.dirname( os.path.abspath(__file__) ) ) )
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
-torch.multiprocessing.set_sharing_strategy('file_system')
+
+torch.multiprocessing.set_sharing_strategy("file_system")
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from multiprocessing import Manager
@@ -17,30 +20,57 @@ import configargparse
 from torch.utils.data import DataLoader
 import loss_functions
 import config
+import dataio
 
 p = configargparse.ArgumentParser()
-p.add('-c', '--config_filepath', required=False, is_config_file=True, help='Path to config file.')
+p.add(
+    "-c",
+    "--config_filepath",
+    required=False,
+    is_config_file=True,
+    help="Path to config file.",
+)
 
-p.add_argument('--logging_root', type=str, default=config.logging_root, required=False, help='root for logging')
-p.add_argument('--data_root', type=str, required=True)
-p.add_argument('--network', type=str, default='relu')
-p.add_argument('--conditioning', type=str, default='hyper')
-p.add_argument('--experiment_name', type=str, required=True)
-p.add_argument('--num_trgt', type=int, default=1)
-p.add_argument('--gpus', type=int, default=1)
-p.add_argument('--lr', type=float, default=1e-4)
-p.add_argument('--num_epochs', type=int, default=40001)
-p.add_argument('--epochs_til_ckpt', type=int, default=10)
-p.add_argument('--steps_til_summary', type=int, default=1000)
-p.add_argument('--max_num_instances', type=int, default=None)
-p.add_argument('--max_observations_per_instance', type=int, default=None)
-p.add_argument('--iters_til_ckpt', type=int, default=10000)
-p.add_argument('--checkpoint_path', default=None)
-p.add_argument('--optim_checkpoint_path', default=None)
+p.add_argument(
+    "--logging_root",
+    type=str,
+    default=config.logging_root,
+    required=False,
+    help="root for logging",
+)
+p.add_argument("--data_root", type=str, required=True)
+p.add_argument("--network", type=str, default="relu")
+p.add_argument("--conditioning", type=str, default="hyper")
+p.add_argument("--experiment_name", type=str, required=True)
+p.add_argument("--num_trgt", type=int, default=1)
+p.add_argument("--gpus", type=int, default=1)
+p.add_argument("--lr", type=float, default=1e-4)
+p.add_argument("--num_epochs", type=int, default=40001)
+p.add_argument("--epochs_til_ckpt", type=int, default=10)
+p.add_argument("--steps_til_summary", type=int, default=1000)
+p.add_argument("--max_num_instances", type=int, default=None)
+p.add_argument("--max_observations_per_instance", type=int, default=None)
+p.add_argument("--iters_til_ckpt", type=int, default=10000)
+p.add_argument("--checkpoint_path", default=None)
+p.add_argument("--optim_checkpoint_path", default=None)
 opt = p.parse_args()
 
 batch_sizes = 256, 50
 sidelens = 64, 128
+
+
+def glob(pathname, *, recursive=False):
+    """Return a list of paths matching a pathname pattern.
+
+    The pattern may contain simple shell-style wildcards a la
+    fnmatch. However, unlike fnmatch, filenames starting with a
+    dot are special cases that are not matched by '*' and '?'
+    patterns.
+
+    If recursive is true, the pattern '**' will match any files and
+    zero or more directories and subdirectories.
+    """
+    return list(iglob(pathname, recursive=recursive))
 
 def sync_model(model):
     for param in model.parameters():
@@ -49,25 +79,66 @@ def sync_model(model):
 
 def multigpu_train(gpu, opt, cache):
     if opt.gpus > 1:
-        dist.init_process_group(backend='nccl', init_method='tcp://localhost:1492', world_size=opt.gpus, rank=gpu)
+        dist.init_process_group(
+            backend="nccl",
+            init_method="tcp://localhost:1492",
+            world_size=opt.gpus,
+            rank=gpu,
+        )
 
-    # Ignore this line if CPU only
+    # Checking if GPU is available
+    cuda_avail = False
     if torch.cuda.is_available():
+        cuda_avail = True
         torch.cuda.set_device(gpu)
 
     def create_dataloader_callback(sidelength, batch_size, query_sparsity):
-        train_dataset = hdf5_dataio.SceneClassDataset(num_context=0, num_trgt=opt.num_trgt,
-                                                      data_root=opt.data_root, query_sparsity=query_sparsity,
-                                                      img_sidelength=sidelength, vary_context_number=True, cache=cache,
-                                                      max_num_instances=opt.max_num_instances,
-                                                      max_observations_per_instance=opt.max_observations_per_instance)
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                                  drop_last=True, num_workers=0)
+        if not "hdf5" in opt.data_root:
+            train_dataset = dataio.SceneClassDataset(
+                num_context=0,
+                num_trgt=opt.num_trgt,
+                root_dir=opt.data_root,
+                query_sparsity=query_sparsity,
+                img_sidelength=sidelength,
+                max_num_instances=opt.max_num_instances,
+                max_observations_per_instance=opt.max_observations_per_instance,
+                cache=cache,
+            )
+        else:
+            train_dataset = hdf5_dataio.SceneClassDataset(
+                num_context=0,
+                num_trgt=opt.num_trgt,
+                data_root=opt.data_root,
+                query_sparsity=query_sparsity,
+                img_sidelength=sidelength,
+                vary_context_number=True,
+                cache=cache,
+                max_num_instances=opt.max_num_instances,
+                max_observations_per_instance=opt.max_observations_per_instance,
+            )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=0,
+        )
         return train_loader
 
-    num_instances = hdf5_dataio.get_num_instances(opt.data_root)
-    model = models.LFAutoDecoder(latent_dim=256, num_instances=num_instances, parameterization='plucker',
-                                 network=opt.network, conditioning=opt.conditioning).cuda()
+    if not "hdf5" in opt.data_root:
+        instances = glob(os.path.join(opt.data_root, "*/"))
+        num_instances = len(instances)
+    else:
+        num_instances = hdf5_dataio.get_num_instances(opt.data_root)
+    model = models.LFAutoDecoder(
+        latent_dim=256,
+        num_instances=num_instances,
+        parameterization="plucker",
+        network=opt.network,
+        conditioning=opt.conditioning,
+    )
+    if cuda_avail:
+        model = model.cuda()
 
     if opt.checkpoint_path is not None:
         state_dict = torch.load(opt.checkpoint_path)
@@ -86,17 +157,32 @@ def multigpu_train(gpu, opt, cache):
         state_dict = torch.load(opt.optim_checkpoint_path)
         optimizers[0].load_state_dict(state_dict)
     else:
-        optimizers=None
+        optimizers = None
 
-    training.multiscale_training(model=model, dataloader_callback=create_dataloader_callback,
-                                 dataloader_iters=(10000, 500000),
-                                 dataloader_params=((sidelens[0], batch_sizes[0], None), (sidelens[1], batch_sizes[1], None)),
-                                 epochs=opt.num_epochs, lr=opt.lr, steps_til_summary=opt.steps_til_summary,
-                                 epochs_til_checkpoint=opt.epochs_til_ckpt,
-                                 model_dir=root_path, loss_fn=loss_fn, val_loss_fn=val_loss_fn,
-                                 iters_til_checkpoint=opt.iters_til_ckpt, summary_fn=summary_fn,
-                                 overwrite=True, optimizers=optimizers,
-                                 rank=gpu, train_function=training.train, gpus=opt.gpus)
+    training.multiscale_training(
+        model=model,
+        dataloader_callback=create_dataloader_callback,
+        dataloader_iters=(10000, 500000),
+        dataloader_params=(
+            (sidelens[0], batch_sizes[0], None),
+            (sidelens[1], batch_sizes[1], None),
+        ),
+        epochs=opt.num_epochs,
+        lr=opt.lr,
+        steps_til_summary=opt.steps_til_summary,
+        epochs_til_checkpoint=opt.epochs_til_ckpt,
+        model_dir=root_path,
+        loss_fn=loss_fn,
+        val_loss_fn=val_loss_fn,
+        iters_til_checkpoint=opt.iters_til_ckpt,
+        summary_fn=summary_fn,
+        overwrite=True,
+        optimizers=optimizers,
+        rank=gpu,
+        train_function=training.train,
+        gpus=opt.gpus,
+    )
+
 
 if __name__ == "__main__":
     manager = Manager()

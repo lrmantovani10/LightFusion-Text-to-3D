@@ -7,7 +7,6 @@ from glob import glob
 import data_util
 import util
 from collections import defaultdict
-import load_llff
 from PIL import Image
 import skimage.filters
 
@@ -72,10 +71,11 @@ class SceneInstanceDataset(torch.utils.data.Dataset):
         self.intrinsics = torch.Tensor(self.intrinsics).float()
 
     def set_img_sidelength(self, new_img_sidelength):
-        """For multi-resolution training: Updates the image sidelength with whichimages are loaded."""
+        """For multi-resolution training: Updates the image sidelength with which images are loaded."""
         self.img_sidelength = new_img_sidelength
 
     def __len__(self):
+        print(self.pose_paths, self.param_paths)
         return min(len(self.pose_paths), len(self.color_paths))
 
     def __getitem__(self, idx):
