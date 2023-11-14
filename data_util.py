@@ -80,6 +80,8 @@ def glob_imgs(path):
         imgs.extend(glob(os.path.join(path, ext)))
     return imgs
 
+'''
+For visualizing the data in the original hdf5 file used by the LFN's creators:
 
 def visualize_data(filepath):
     with h5py.File(filepath, "r") as file:
@@ -121,9 +123,11 @@ def visualize_data(filepath):
             s = s.decode("utf-8")
             print(s)
             break
+'''
 
 
-def visualize_data_new(filepath):
+
+def visualize_data(filepath):
     with h5py.File(filepath, "r") as file:
         # Setting the dataset to the first entry in the file
         for name, item in file.items():
@@ -152,9 +156,8 @@ def visualize_data_new(filepath):
 
 # Testing data visualization
 def test_examples():
-    from data_util import visualize_data, visualize_data_new
+    from data_util import visualize_data
     from sd import generate_image
 
     generate_image("dragon", 1.5, 20, 5, 128, 128, 1)
-    visualize_data_new("data/dragon.hdf5")
-    visualize_data("data/cars/cars_train.hdf5")
+    visualize_data("data/dragon.hdf5")
