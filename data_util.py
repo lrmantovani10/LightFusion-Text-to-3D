@@ -8,6 +8,7 @@ import shutil
 import skimage
 import h5py
 import io
+from PIL import Image
 
 
 def load_depth(path, sidelength=None):
@@ -26,33 +27,11 @@ def load_depth(path, sidelength=None):
     return img
 
 
-def load_numpy_hdf5(instance_ds, key):
-    rgb_ds = instance_ds["rgb"]
-    raw = rgb_ds[key][...]
-    s = raw.tostring()
-    f = io.BytesIO(s)
-
-    img = imageio.imread(f)[:, :, :3]
-    img = skimage.img_as_float32(img)
-
-    img = square_crop_img(img)
-
-    img -= 0.5
-    img *= 2.0
-
-    return img
-
-
 def load_rgb_hdf5(instance_ds, key, sidelength=None):
-    rgb_ds = instance_ds["rgb"]
-    raw = rgb_ds[key][...]
-    s = raw.tostring()
-    f = io.BytesIO(s)
-
-    img = imageio.imread(f)[:, :, :3]
-    img = skimage.img_as_float32(img)
-
-    img = square_crop_img(img)
+    rgb_ds = instance_ds["rgb"][()]
+    # Cast to float
+    rgb_ds = rgb_ds.astype(np.float64)
+    img = square_crop_img(rgb_ds)
 
     if sidelength is not None:
         img = cv2.resize(img, (sidelength, sidelength), interpolation=cv2.INTER_AREA)
@@ -64,12 +43,10 @@ def load_rgb_hdf5(instance_ds, key, sidelength=None):
 
 
 def load_pose_hdf5(instance_ds, key):
-    pose_ds = instance_ds["pose"]
-    raw = pose_ds[key][...]
-    ba = bytearray(raw)
-    s = ba.decode("ascii")
+    pose_ds = instance_ds["pose"][()]
+    pose = pose_ds.decode("utf-8")
 
-    lines = s.splitlines()
+    lines = pose.splitlines()
 
     if len(lines) == 1:
         pose = np.zeros((4, 4), dtype=np.float32)
@@ -102,3 +79,82 @@ def glob_imgs(path):
     for ext in ["*.png", "*.jpg", "*.JPEG", "*.JPG"]:
         imgs.extend(glob(os.path.join(path, ext)))
     return imgs
+
+
+def visualize_data(filepath):
+    with h5py.File(filepath, "r") as file:
+        # Setting the dataset to the first entry in the file
+        for name, item in file.items():
+            print(name, item)
+            dataset = item
+            break
+
+        # Viewing the first pose
+        pose = dataset["pose"]
+        print("Pose", pose)
+        for _, item in pose.items():
+            data = item[()]
+            text_content = data.tobytes().decode("utf-8")
+            print(text_content, "\n")
+            break
+
+        # Displaying the first image
+        rgb = dataset["rgb"]
+        print("RGB", rgb)
+
+        for item in rgb.keys():
+            raw = dataset["rgb"][item][...]
+            s = raw.tostring()
+            f = io.BytesIO(s)
+            # Display the image
+            img = Image.open(f)
+            img.show()
+            break
+
+        # Intrinsics data
+        intrinsics = ["intrinsics.txt"]
+        # Print the data of the first intrinsics file
+        for item in intrinsics:
+            intrinsics = dataset[item][...]
+            # convert to string
+            s = intrinsics.tostring()
+            s = s.decode("utf-8")
+            print(s)
+            break
+
+
+def visualize_data_new(filepath):
+    with h5py.File(filepath, "r") as file:
+        # Setting the dataset to the first entry in the file
+        for name, item in file.items():
+            print(name, item)
+            dataset = item
+            break
+
+        # Viewing the first pose
+        pose = dataset["pose"][()]
+        pose = pose.decode("utf-8")
+        print("Pose\n", pose)
+
+        # Displaying the first image
+        rgb = dataset["rgb"][()]
+
+        # Display the image
+        img = Image.fromarray(rgb)
+        img.show()
+
+        # Display intrinsics data
+        intrinsics = dataset["intrinsics.txt"]
+        intrinsics = intrinsics[()]
+        intrinsics = intrinsics.decode("utf-8")
+        print("Intrinsics\n", intrinsics)
+
+
+# Testing data visualization
+def test_examples():
+    from data_util import visualize_data, visualize_data_new
+    from sd import generate_image
+
+    generate_image("dragon", 1.5, 20, 5, 128, 128, 1)
+    visualize_data_new("data/dragon.hdf5")
+    visualize_data("data/cars/cars_train.hdf5")

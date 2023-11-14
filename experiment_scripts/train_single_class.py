@@ -48,7 +48,6 @@ p.add_argument("--num_epochs", type=int, default=40001)
 p.add_argument("--epochs_til_ckpt", type=int, default=10)
 p.add_argument("--steps_til_summary", type=int, default=1000)
 p.add_argument("--max_num_instances", type=int, default=None)
-p.add_argument("--max_observations_per_instance", type=int, default=None)
 p.add_argument("--iters_til_ckpt", type=int, default=10000)
 p.add_argument("--checkpoint_path", default=None)
 p.add_argument("--optim_checkpoint_path", default=None)
@@ -78,6 +77,7 @@ def sync_model(model):
 
 
 def multigpu_train(gpu, opt, cache):
+
     if opt.gpus > 1:
         dist.init_process_group(
             backend="nccl",
@@ -102,7 +102,6 @@ def multigpu_train(gpu, opt, cache):
             vary_context_number=True,
             cache=cache,
             max_num_instances=opt.max_num_instances,
-            max_observations_per_instance=opt.max_observations_per_instance,
         )
         train_loader = DataLoader(
             train_dataset,

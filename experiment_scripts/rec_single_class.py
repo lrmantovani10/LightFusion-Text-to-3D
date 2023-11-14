@@ -47,7 +47,6 @@ p.add_argument("--network_lr", type=float, default=0)
 p.add_argument("--checkpoint_path", default=None)
 p.add_argument("--num_shot", type=int, default=1)
 
-p.add_argument("--spec_observation_idcs", type=str, default="64")
 p.add_argument("--num_epochs", type=int, default=40001)
 p.add_argument("--max_num_instances", type=int, default=None)
 p.add_argument("--batch_size", type=int, default=70)
@@ -57,11 +56,6 @@ p.add_argument("--epochs_til_ckpt", type=int, default=100)
 p.add_argument("--steps_til_summary", type=int, default=200)
 p.add_argument("--iters_til_ckpt", type=int, default=10000)
 opt = p.parse_args()
-
-if opt.spec_observation_idcs is not None:
-    specific_observation_idcs = util.parse_comma_separated_integers(
-        opt.spec_observation_idcs
-    )
 
 
 def sync_model(model):
@@ -88,7 +82,6 @@ def multigpu_train(gpu, opt, cache):
             max_num_instances=opt.max_num_instances,
             img_sidelength=sidelength,
             cache=cache,
-            specific_observation_idcs=specific_observation_idcs,
         )
         train_loader = DataLoader(
             train_dataset,

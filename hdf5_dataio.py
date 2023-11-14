@@ -16,8 +16,6 @@ class SceneInstanceDatasetHDF5(torch.utils.data.Dataset):
         instance_ds,
         img_sidelength,
         instance_name,
-        specific_observation_idcs=None,
-        num_images=None,
         cache=None,
     ):
         self.instance_idx = instance_idx
@@ -26,22 +24,12 @@ class SceneInstanceDatasetHDF5(torch.utils.data.Dataset):
         self.instance_ds = instance_ds
         self.has_depth = False
 
-        self.color_keys = sorted(list(instance_ds["rgb"].keys()))
-        self.pose_keys = sorted(list(instance_ds["pose"].keys()))
+        self.color_key = instance_ds["rgb"][()]
+        self.pose_key = instance_ds["pose"][()]
         self.instance_name = instance_name
 
-        if specific_observation_idcs is not None:
-            self.color_keys = util.pick(self.color_keys, specific_observation_idcs)
-            self.pose_keys = util.pick(self.pose_keys, specific_observation_idcs)
-        elif num_images is not None:
-            idcs = np.linspace(
-                0, stop=len(self.color_keys), num=num_images, endpoint=False, dtype=int
-            )
-            self.color_keys = util.pick(self.color_keys, idcs)
-            self.pose_keys = util.pick(self.pose_keys, idcs)
-
-        dummy_img = data_util.load_rgb_hdf5(self.instance_ds, self.color_keys[0])
-        self.org_sidelength = dummy_img.shape[1]
+        image = data_util.load_rgb_hdf5(self.instance_ds, self.color_key)
+        self.org_sidelength = image.shape[1]
 
         if self.org_sidelength < self.img_sidelength:
             uv = (
@@ -72,15 +60,15 @@ class SceneInstanceDatasetHDF5(torch.utils.data.Dataset):
         self.intrinsics = torch.from_numpy(self.intrinsics).float()
 
     def __len__(self):
-        return min(len(self.pose_keys), len(self.color_keys))
+        return 1
 
     def __getitem__(self, idx):
         key = f"{self.instance_idx}_{idx}"
         if (self.cache is not None) and (key in self.cache):
             rgb, pose = self.cache[key]
         else:
-            rgb = data_util.load_rgb_hdf5(self.instance_ds, self.color_keys[idx])
-            pose = data_util.load_pose_hdf5(self.instance_ds, self.pose_keys[idx])
+            rgb = data_util.load_rgb_hdf5(self.instance_ds, self.color_key)
+            pose = data_util.load_pose_hdf5(self.instance_ds, self.pose_key)
 
             if (self.cache is not None) and (key not in self.cache):
                 self.cache[key] = rgb, pose
@@ -112,10 +100,8 @@ def get_num_instances(data_root):
 def get_instance_datasets_hdf5(
     root,
     max_num_instances=None,
-    specific_observation_idcs=None,
     cache=None,
     sidelen=None,
-    max_observations_per_instance=None,
     start_idx=0,
 ):
     file = h5py.File(root, "r")
@@ -124,14 +110,12 @@ def get_instance_datasets_hdf5(
 
     if max_num_instances is not None:
         instances = instances[:max_num_instances]
-
+    
     all_instances = [
         SceneInstanceDatasetHDF5(
             instance_idx=idx + start_idx,
             instance_ds=file[instance_name],
-            specific_observation_idcs=specific_observation_idcs,
             img_sidelength=sidelen,
-            num_images=max_observations_per_instance,
             cache=cache,
             instance_name=instance_name,
         )
@@ -152,8 +136,6 @@ class SceneClassDataset(torch.utils.data.Dataset):
         query_sparsity=None,
         img_sidelength=None,
         max_num_instances=None,
-        max_observations_per_instance=None,
-        specific_observation_idcs=None,
         test=False,
         test_context_idcs=None,
         cache=None,
@@ -170,10 +152,8 @@ class SceneClassDataset(torch.utils.data.Dataset):
         self.all_instances = get_instance_datasets_hdf5(
             data_root,
             max_num_instances=max_num_instances,
-            specific_observation_idcs=specific_observation_idcs,
             cache=cache,
             sidelen=img_sidelength,
-            max_observations_per_instance=max_observations_per_instance,
             start_idx=start_idx,
         )
 
@@ -191,7 +171,7 @@ class SceneClassDataset(torch.utils.data.Dataset):
             for key in ["rgb", "uv"]:
                 new_dict[key] = dict[key][rand_idcs]
 
-            for key, v in dict.items():
+            for key, _ in dict.items():
                 if key not in ["rgb", "uv"]:
                     new_dict[key] = dict[key]
 

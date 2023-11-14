@@ -7,10 +7,11 @@ import collections
 
 
 def parse_intrinsics_hdf5(raw_data, trgt_sidelength=None, invert_y=False):
-    s = raw_data[...].tostring()
-    s = s.decode("utf-8")
+    intrinsics = raw_data["intrinsics.txt"]
+    intrinsics = intrinsics[()]
+    intrinsics = intrinsics.decode("utf-8")
 
-    lines = s.split("\n")
+    lines = intrinsics.split("\n")
 
     f, cx, cy, _ = map(float, lines[0].split())
     grid_barycenter = torch.Tensor(list(map(float, lines[1].split())))
