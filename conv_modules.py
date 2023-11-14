@@ -8,11 +8,11 @@ import torch.nn.functional as F
 
 
 def normalize_imagenet(x):
-    ''' Normalize input images according to ImageNet standards.
+    """Normalize input images according to ImageNet standards.
 
     Args:
         x (tensor): input images
-    '''
+    """
     x = x.clone()
     x[:, 0] = (x[:, 0] - 0.485) / 0.229
     x[:, 1] = (x[:, 1] - 0.456) / 0.224
@@ -21,20 +21,21 @@ def normalize_imagenet(x):
 
 
 def init_weights_normal(m):
-    if hasattr(m, 'weight'):
-        nn.init.kaiming_normal_(m.weight, a=0.0, nonlinearity='relu', mode='fan_in')
+    if hasattr(m, "weight"):
+        nn.init.kaiming_normal_(m.weight, a=0.0, nonlinearity="relu", mode="fan_in")
 
 
 class Resnet18(nn.Module):
-    r''' ResNet-18 encoder network for image input.
+    r"""ResNet-18 encoder network for image input.
     Args:
         c_dim (int): output dimension of the latent embedding
         normalize (bool): whether the input images should be normalized
         use_linear (bool): whether a final linear layer should be used
-    '''
+    """
+
     def init_weights_normal(m):
-        if hasattr(m, 'weight'):
-            nn.init.kaiming_normal_(m.weight, a=0.0, nonlinearity='relu', mode='fan_in')
+        if hasattr(m, "weight"):
+            nn.init.kaiming_normal_(m.weight, a=0.0, nonlinearity="relu", mode="fan_in")
 
     def __init__(self, c_dim, normalize=True, use_linear=True):
         super().__init__()
@@ -48,7 +49,7 @@ class Resnet18(nn.Module):
         elif c_dim == 512:
             self.fc = nn.Sequential()
         else:
-            raise ValueError('c_dim must be 512 if use_linear is False')
+            raise ValueError("c_dim must be 512 if use_linear is False")
 
     def forward(self, input):
         x = (input + 1) / 2
@@ -57,4 +58,3 @@ class Resnet18(nn.Module):
         net = self.features(x)
         out = self.fc(net)
         return out
-

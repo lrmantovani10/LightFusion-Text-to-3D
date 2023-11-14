@@ -20,7 +20,6 @@ import configargparse
 from torch.utils.data import DataLoader
 import loss_functions
 import config
-import dataio
 
 p = configargparse.ArgumentParser()
 p.add(
@@ -72,6 +71,7 @@ def glob(pathname, *, recursive=False):
     """
     return list(iglob(pathname, recursive=recursive))
 
+
 def sync_model(model):
     for param in model.parameters():
         dist.broadcast(param.data, 0)
@@ -93,29 +93,17 @@ def multigpu_train(gpu, opt, cache):
         torch.cuda.set_device(gpu)
 
     def create_dataloader_callback(sidelength, batch_size, query_sparsity):
-        if not "hdf5" in opt.data_root:
-            train_dataset = dataio.SceneClassDataset(
-                num_context=0,
-                num_trgt=opt.num_trgt,
-                root_dir=opt.data_root,
-                query_sparsity=query_sparsity,
-                img_sidelength=sidelength,
-                max_num_instances=opt.max_num_instances,
-                max_observations_per_instance=opt.max_observations_per_instance,
-                cache=cache,
-            )
-        else:
-            train_dataset = hdf5_dataio.SceneClassDataset(
-                num_context=0,
-                num_trgt=opt.num_trgt,
-                data_root=opt.data_root,
-                query_sparsity=query_sparsity,
-                img_sidelength=sidelength,
-                vary_context_number=True,
-                cache=cache,
-                max_num_instances=opt.max_num_instances,
-                max_observations_per_instance=opt.max_observations_per_instance,
-            )
+        train_dataset = hdf5_dataio.SceneClassDataset(
+            num_context=0,
+            num_trgt=opt.num_trgt,
+            data_root=opt.data_root,
+            query_sparsity=query_sparsity,
+            img_sidelength=sidelength,
+            vary_context_number=True,
+            cache=cache,
+            max_num_instances=opt.max_num_instances,
+            max_observations_per_instance=opt.max_observations_per_instance,
+        )
         train_loader = DataLoader(
             train_dataset,
             batch_size=batch_size,
@@ -125,11 +113,7 @@ def multigpu_train(gpu, opt, cache):
         )
         return train_loader
 
-    if not "hdf5" in opt.data_root:
-        instances = glob(os.path.join(opt.data_root, "*/"))
-        num_instances = len(instances)
-    else:
-        num_instances = hdf5_dataio.get_num_instances(opt.data_root)
+    num_instances = hdf5_dataio.get_num_instances(opt.data_root)
     model = models.LFAutoDecoder(
         latent_dim=256,
         num_instances=num_instances,

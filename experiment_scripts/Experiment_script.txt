@@ -1,0 +1,1 @@
+python experiment_scripts/train_single_class.py --data_root=data/cars/cars_train.hdf5 --experiment_name="Car_Dataset"
