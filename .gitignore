@@ -105,4 +105,9 @@ venv.bak/
 
 # data being used
 data/
-```
+
+# lfn outputs
+light_fields/
+
+# torch metadata
+torchmeta/
