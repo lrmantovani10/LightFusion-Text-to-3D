@@ -7,8 +7,7 @@ import collections
 
 
 def parse_intrinsics_hdf5(raw_data, trgt_sidelength=None, invert_y=False):
-    intrinsics = raw_data["intrinsics.txt"]
-    intrinsics = intrinsics[()]
+    intrinsics = raw_data[()]
     intrinsics = intrinsics.decode("utf-8")
 
     lines = intrinsics.split("\n")
