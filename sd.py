@@ -167,6 +167,9 @@ def generate_image(
                 negative_prompt=negative_prompt,
             ).images[0]
 
+            # Resize to 128x128
+            image = image.resize((128, 128))
+
             # Create a group in the file
             group = file.create_group("instance_" + str(i + 1))
 

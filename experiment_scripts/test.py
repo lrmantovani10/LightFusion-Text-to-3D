@@ -122,7 +122,7 @@ with torch.no_grad():
             psnr, ssim = get_psnr(out_dict["rgb"], out_dict["gt_rgb"])
             psnrs.append((psnr, ssim))
 
-            # Saving the images on the logging folder
+            # Saving the images in the logging folder
             if i < opt.save_out_first_n:
                 img = convert_image(out_dict["gt_rgb"], "rgb")
                 cv2.imwrite(str(instance_dir / f"{j:06d}_gt.png"), img)
