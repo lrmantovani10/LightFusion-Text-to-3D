@@ -1,20 +1,13 @@
-"""
-Double-checked that softras split was used via (and by switching "dataset_type" to train).
-python test.py --experiment_name=nmr_dummy --checkpoint_path=/om2/user/sitzmann/logs/light_fields/NMR_hyper_1e2_reg_layernorm/64_256_None/checkpoints/model_epoch_0087_iter_250000.pth --data_root=/om2/user/egger/MultiClassSRN/data/NMR_Dataset --max_num_instances=10 --dataset=NMR
-Then also checked that the reconstruction checkpoint (nmr_rec) and the final checkpoint from this run had the same parameters (which they did). So, false alarm!
-"""
 # Enable import from parent package
 import torch.nn.functional as F
 import sys
 import os
 import numpy as np
-import skimage.measure
+import skimage
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import hdf5_dataio
-
-from collections import defaultdict
 import cv2
 import torch
 import models
@@ -50,7 +43,12 @@ model = models.LFAutoDecoder(
     parameterization="plucker",
     network=opt.network,
     conditioning=opt.conditioning,
-).cuda()
+)
+# Checking if GPU is available
+gpu_avail = torch.cuda.is_available()
+if gpu_avail:
+    model = model.cuda()
+
 model.eval()
 print("Loading model")
 model.load_state_dict(state_dict)
@@ -84,8 +82,10 @@ def get_psnr(p, trgt):
     p = np.clip(p, a_min=0.0, a_max=1.0)
     trgt = (trgt / 2.0) + 0.5
 
-    ssim = skimage.measure.compare_ssim(p, trgt, multichannel=True, data_range=1)
-    psnr = skimage.measure.compare_psnr(p, trgt, data_range=1)
+    ssim = skimage.metrics.structural_similarity(
+        p, trgt, multichannel=True, data_range=1, win_size=7, channel_axis=2
+    )
+    psnr = skimage.metrics.structural_similarity(p, trgt, data_range=1, win_size=7, channel_axis=2)
 
     return psnr, ssim
 
@@ -110,9 +110,10 @@ with torch.no_grad():
             instance_dir.mkdir(exist_ok=True, parents=True)
 
         for j, query in enumerate(dataset[i]):
-            model_input = util.assemble_model_input(query, query)
+            model_input = util.assemble_model_input(query, query, gpu_avail)
             model_output = model(model_input)
 
+            # Obtaining the generated image and the ground truth image
             out_dict = {}
             out_dict["rgb"] = model_output["rgb"]
             out_dict["gt_rgb"] = model_input["query"]["rgb"]
@@ -121,6 +122,7 @@ with torch.no_grad():
             psnr, ssim = get_psnr(out_dict["rgb"], out_dict["gt_rgb"])
             psnrs.append((psnr, ssim))
 
+            # Saving the images on the logging folder
             if i < opt.save_out_first_n:
                 img = convert_image(out_dict["gt_rgb"], "rgb")
                 cv2.imwrite(str(instance_dir / f"{j:06d}_gt.png"), img)

@@ -1,1 +1,13 @@
-python experiment_scripts/train_single_class.py --data_root=data/cars/cars_train.hdf5 --experiment_name="Car_Dataset"
+
+TRAINING:
+    python experiment_scripts/train_single_class.py --data_root=data/dragon.hdf5 --experiment_name="Dragon_Dataset"
+
+RECONSTRUCTION:
+    python experiment_scripts/rec_single_class.py --data_root=data/dragon.hdf5 --experiment_name="Dragon_Dataset_Rec_128" --checkpoint_path=light_fields/Dragon_Dataset/128_50_None/checkpoints/model_final.pth
+
+    python experiment_scripts/rec_single_class.py --data_root=data/dragon.hdf5 --experiment_name="Dragon_Dataset_Rec_64" --checkpoint_path=light_fields/Dragon_Dataset/64_256_None/checkpoints/model_final.pth
+
+TESTING:
+    python experiment_scripts/test.py --data_root=data/dragon.hdf5 --experiment_name="Dragon_Dataset_Test_64" --checkpoint_path=light_fields/Dragon_Dataset/64_256_None/checkpoints/model_final.pth
+
+    python experiment_scripts/test.py --data_root=data/dragon.hdf5 --experiment_name="Dragon_Dataset_Test_128" --checkpoint_path=light_fields/Dragon_Dataset/128_50_None/checkpoints/model_final.pth

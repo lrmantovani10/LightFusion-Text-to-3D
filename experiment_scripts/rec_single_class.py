@@ -45,7 +45,8 @@ p.add_argument("--network_lr", type=float, default=0)
 p.add_argument("--checkpoint_path", default=None)
 p.add_argument("--num_shot", type=int, default=1)
 
-p.add_argument("--num_epochs", type=int, default=40001)
+# p.add_argument("--num_epochs", type=int, default=40001)
+p.add_argument("--num_epochs", type=int, default=100)
 p.add_argument("--max_num_instances", type=int, default=None)
 p.add_argument("--batch_size", type=int, default=70)
 p.add_argument("--gpus", type=int, default=1)
@@ -129,7 +130,8 @@ def multigpu_train(gpu, opt, cache):
     training.multiscale_training(
         model=model,
         dataloader_callback=create_dataloader_callback,
-        dataloader_iters=(500000,),
+        # dataloader_iters=(500000,),
+        dataloader_iters=(500,),
         dataloader_params=((opt.sidelen, opt.batch_size, None),),
         epochs=opt.num_epochs,
         lr=opt.lr,
