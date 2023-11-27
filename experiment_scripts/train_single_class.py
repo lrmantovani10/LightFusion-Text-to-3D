@@ -44,7 +44,8 @@ p.add_argument("--experiment_name", type=str, required=True)
 p.add_argument("--num_trgt", type=int, default=1)
 p.add_argument("--gpus", type=int, default=1)
 p.add_argument("--lr", type=float, default=1e-4)
-p.add_argument("--num_epochs", type=int, default=40001)
+# p.add_argument("--num_epochs", type=int, default=40001)
+p.add_argument("--num_epochs", type=int, default=100)
 p.add_argument("--epochs_til_ckpt", type=int, default=10)
 p.add_argument("--steps_til_summary", type=int, default=1000)
 p.add_argument("--max_num_instances", type=int, default=None)
@@ -145,7 +146,8 @@ def multigpu_train(gpu, opt, cache):
     training.multiscale_training(
         model=model,
         dataloader_callback=create_dataloader_callback,
-        dataloader_iters=(10000, 500000),
+        # dataloader_iters=(10000, 500000),
+        dataloader_iters=(100, 5000),
         dataloader_params=(
             (sidelens[0], batch_sizes[0], None),
             (sidelens[1], batch_sizes[1], None),

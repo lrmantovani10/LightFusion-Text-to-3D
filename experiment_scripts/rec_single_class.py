@@ -4,11 +4,9 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from glob import glob
 import torch
 
 torch.multiprocessing.set_sharing_strategy("file_system")
-import util
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from multiprocessing import Manager
@@ -71,7 +69,12 @@ def multigpu_train(gpu, opt, cache):
             world_size=opt.gpus,
             rank=gpu,
         )
-    torch.cuda.set_device(gpu)
+
+    # Checking if GPU is available
+    cuda_avail = False
+    if torch.cuda.is_available():
+        cuda_avail = True
+        torch.cuda.set_device(gpu)
 
     def create_dataloader_callback(sidelength, batch_size, query_sparsity):
         train_dataset = hdf5_dataio.SceneClassDataset(
@@ -99,7 +102,9 @@ def multigpu_train(gpu, opt, cache):
         parameterization="plucker",
         network=opt.network,
         conditioning=opt.conditioning,
-    ).cuda()
+    )
+    if cuda_avail:
+        model = model.cuda()
 
     state_dict = torch.load(opt.checkpoint_path)
     state_dict["latent_codes.weight"] = torch.zeros_like(model.latent_codes.weight)
