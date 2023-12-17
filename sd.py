@@ -14,22 +14,25 @@ cuda_there = False
 # Check if MPS is available
 mps_there = False
 if torch.cuda.is_available():
+    # If there are any problems installing deepspeed, run "pip install py-cpuinfo" before installing deepspeed
     import deepspeed
 
     cuda_there = True
-elif os.environ.get("MPS", None) == "1":
+
+# For MPS to work, you must (as of this writing) use the PyTorch nightly build, so make sure that is the one you have installed for your virtual env
+elif torch.backends.mps.is_available():
     mps_there = True
 
 pipe_base = StableDiffusionXLPipeline.from_pretrained(
     base_model,
     torch_dtype=(torch.float16 if fast_mode else torch.float32),
-    revision=("fp16" if fast_mode else "main"),
+    revision="main",
 )
 
 pipe_refiner = StableDiffusionXLPipeline.from_pretrained(
     refiner_model,
     torch_dtype=(torch.float16 if fast_mode else torch.float32),
-    revision=("fp16" if fast_mode else "main"),
+    revision="main",
 )
 
 if fast_mode:
@@ -56,10 +59,13 @@ for pipe in [pipe_base, pipe_refiner]:
 
     # where to pipe?
     if cuda_there:
+        print("Using CUDA")
         pipe = pipe.to("cuda")
     elif mps_there:
+        print("Using MPS")
         pipe = pipe.to("mps")
     else:
+        print("Using CPU")
         pipe.to("cpu")
 
 # Number of inference steps
@@ -146,7 +152,7 @@ def generate_images(
     if not os.path.exists(generated_images_folder):
         os.makedirs(generated_images_folder)
 
-    prompt += ", in the center of a blank background"
+    prompt += ", in the center of a blank background, only a single figure"
     # Add style to prompt
     if style:
         try:
@@ -205,12 +211,6 @@ def generate_images(
 
     # Generate images for each pose
     for i, pose in enumerate(poses):
-        latents = torch.randn(
-            (1, pipe.unet.config.in_channels, height // 8, width // 8),
-            generator=generator,
-            device=device,
-        )
-
         pose_data = generate_pose_data(rotations[i])
         image_pose = ""
         for row in pose_data:
@@ -219,6 +219,12 @@ def generate_images(
         if not first_image:
             # Include pose in propmpt
             pose_prompt = prompt + ", viewed from the " + pose + " position."
+
+            latents = torch.randn(
+                (1, pipe_base.unet.config.in_channels, height // 8, width // 8),
+                generator=generator,
+                device=device,
+            )
 
             image = pipe_base(
                 pose_prompt,
@@ -237,6 +243,12 @@ def generate_images(
                 + " as in this image, but viewed from the "
                 + pose
                 + " position."
+            )
+
+            latents = torch.randn(
+                (1, pipe_refiner.unet.config.in_channels, height // 8, width // 8),
+                generator=generator,
+                device=device,
             )
 
             # Non-frontal images do not include a face
@@ -274,9 +286,13 @@ def generate_images(
         group = file.create_group("instance_" + str(num_equal_images + 1))
 
         # Create datasets for rgb, pose, intrinsics
-        group.create_dataset("rgb", data=img_arrays)
-        group.create_dataset("pose", data=img_arrays)
-        group.create_dataset("intrinsics.txt", data=intrinsics_arrays)
+        rgbs_data = group.create_group("rgb")
+        poses_data = group.create_group("pose")
+        group.create_dataset("intrinsics.txt", data=image_intrinsics)
+
+        for i in range(len(poses)):
+            poses_data.create_dataset(str(i + 1) + ".png", data=pose_arrays[i])
+            rgbs_data.create_dataset(str(i + 1) + ".txt", data=img_arrays[i])
 
         print("Images saved to " + image_folder)
         return hdf5_filename
