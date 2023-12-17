@@ -104,10 +104,16 @@ venv.bak/
 .mypy_cache/
 
 # data being used
-data/
+image_data/
 
 # lfn outputs
 light_fields/
 
 # torch metadata
 torchmeta/
+
+# Outputs
+**/viewlists/
+
+# SD Testing file
+Content_Generation.ipynb

@@ -110,7 +110,7 @@ def get_instance_datasets_hdf5(
 
     if max_num_instances is not None:
         instances = instances[:max_num_instances]
-    
+
     all_instances = [
         SceneInstanceDatasetHDF5(
             instance_idx=idx + start_idx,
@@ -130,7 +130,7 @@ class SceneClassDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         num_context,
-        num_trgt,
+        num_trgt_samples,
         data_root,
         vary_context_number=False,
         query_sparsity=None,
@@ -142,7 +142,7 @@ class SceneClassDataset(torch.utils.data.Dataset):
         start_idx=0,
     ):
         self.num_context = num_context
-        self.num_trgt = num_trgt
+        self.num_trgt_samples = num_trgt_samples
         self.query_sparsity = query_sparsity
         self.img_sidelength = img_sidelength
         self.vary_context_number = vary_context_number
@@ -227,13 +227,13 @@ class SceneClassDataset(torch.utils.data.Dataset):
                 sample_idcs = np.random.choice(
                     len(self.all_instances[obj_idx]),
                     replace=False,
-                    size=self.num_context + self.num_trgt,
+                    size=self.num_context + self.num_trgt_samples,
                 )
             except:
                 sample_idcs = np.random.choice(
                     len(self.all_instances[obj_idx]),
                     replace=True,
-                    size=self.num_context + self.num_trgt,
+                    size=self.num_context + self.num_trgt_samples,
                 )
 
         for i in range(self.num_context):
@@ -251,7 +251,7 @@ class SceneClassDataset(torch.utils.data.Dataset):
             else:
                 context[-1]["mask"] = torch.Tensor([1.0])
 
-        for i in range(self.num_trgt):
+        for i in range(self.num_trgt_samples):
             if self.test:
                 sample = self.all_instances[obj_idx][det_idx]
             else:

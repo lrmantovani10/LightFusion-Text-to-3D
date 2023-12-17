@@ -25,7 +25,7 @@ def average_gradients(model):
 
 
 def multiscale_training(
-    train_function, dataloader_callback, dataloader_iters, dataloader_params, **kwargs
+    train_function, dataloader_callback, dataloader_iters, dataloader_params, device,**kwargs
 ):
     model = kwargs.pop("model", None)
     optimizers = kwargs.pop("optimizers", None)
@@ -41,6 +41,7 @@ def multiscale_training(
             model=model,
             optimizers=optimizers,
             max_steps=max_steps,
+            device=device,
             **kwargs,
         )
 

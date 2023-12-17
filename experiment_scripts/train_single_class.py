@@ -41,7 +41,7 @@ p.add_argument("--data_root", type=str, required=True)
 p.add_argument("--network", type=str, default="relu")
 p.add_argument("--conditioning", type=str, default="hyper")
 p.add_argument("--experiment_name", type=str, required=True)
-p.add_argument("--num_trgt", type=int, default=1)
+p.add_argument("--num_trgt_samples", type=int, default=1)
 p.add_argument("--gpus", type=int, default=1)
 p.add_argument("--lr", type=float, default=1e-4)
 # p.add_argument("--num_epochs", type=int, default=40001)
@@ -78,7 +78,6 @@ def sync_model(model):
 
 
 def multigpu_train(gpu, opt, cache):
-
     if opt.gpus > 1:
         dist.init_process_group(
             backend="nccl",
@@ -92,26 +91,6 @@ def multigpu_train(gpu, opt, cache):
     if torch.cuda.is_available():
         cuda_avail = True
         torch.cuda.set_device(gpu)
-
-    def create_dataloader_callback(sidelength, batch_size, query_sparsity):
-        train_dataset = hdf5_dataio.SceneClassDataset(
-            num_context=0,
-            num_trgt=opt.num_trgt,
-            data_root=opt.data_root,
-            query_sparsity=query_sparsity,
-            img_sidelength=sidelength,
-            vary_context_number=True,
-            cache=cache,
-            max_num_instances=opt.max_num_instances,
-        )
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            drop_last=True,
-            num_workers=0,
-        )
-        return train_loader
 
     num_instances = hdf5_dataio.get_num_instances(opt.data_root)
     model = models.LFAutoDecoder(
@@ -142,6 +121,26 @@ def multigpu_train(gpu, opt, cache):
         optimizers[0].load_state_dict(state_dict)
     else:
         optimizers = None
+
+    def create_dataloader_callback(sidelength, batch_size, query_sparsity):
+        train_dataset = hdf5_dataio.SceneClassDataset(
+            num_context=0,
+            num_trgt_samples=opt.num_trgt_samples,
+            data_root=opt.data_root,
+            query_sparsity=query_sparsity,
+            img_sidelength=sidelength,
+            vary_context_number=True,
+            cache=cache,
+            max_num_instances=opt.max_num_instances,
+        )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=0,
+        )
+        return train_loader
 
     training.multiscale_training(
         model=model,
@@ -175,6 +174,6 @@ if __name__ == "__main__":
 
     opt = p.parse_args()
     if opt.gpus > 1:
-        mp.spawn(multigpu_train, nprocs=opt.gpus, args=(opt, shared_dict))
+        mp.spawn(multigpu_train, args=(opt, shared_dict), nprocs=opt.gpus)
     else:
         multigpu_train(0, opt, shared_dict)

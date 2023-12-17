@@ -77,25 +77,6 @@ def multigpu_train(gpu, opt, cache):
         cuda_avail = True
         torch.cuda.set_device(gpu)
 
-    def create_dataloader_callback(sidelength, batch_size, query_sparsity):
-        train_dataset = hdf5_dataio.SceneClassDataset(
-            num_context=0,
-            num_trgt=1,
-            data_root=opt.data_root,
-            query_sparsity=None,
-            max_num_instances=opt.max_num_instances,
-            img_sidelength=sidelength,
-            cache=cache,
-        )
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            drop_last=True,
-            num_workers=0,
-        )
-        return train_loader
-
     num_instances = hdf5_dataio.get_num_instances(opt.data_root)
     model = models.LFAutoDecoder(
         latent_dim=256,
@@ -126,6 +107,25 @@ def multigpu_train(gpu, opt, cache):
         if "latent_codes" in name
     ]
     optimizers = [torch.optim.Adam(lr=opt.lr, params=[p for _, p in latent_params])]
+
+    def create_dataloader_callback(sidelength, batch_size, query_sparsity):
+        train_dataset = hdf5_dataio.SceneClassDataset(
+            num_context=0,
+            num_trgt_samples=1,
+            data_root=opt.data_root,
+            query_sparsity=None,
+            max_num_instances=opt.max_num_instances,
+            img_sidelength=sidelength,
+            cache=cache,
+        )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=0,
+        )
+        return train_loader
 
     training.multiscale_training(
         model=model,
