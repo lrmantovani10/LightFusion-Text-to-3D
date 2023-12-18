@@ -1,8 +1,6 @@
 import cv2
-import os
 import torch
 import numpy as np
-from glob import glob
 import data_util
 import util
 from collections import defaultdict

@@ -1,4 +1,3 @@
-import cv2
 import numpy as np
 from glob import glob
 import os
@@ -6,7 +5,7 @@ import h5py
 from PIL import Image
 
 
-def load_pose_hdf5(instance_ds, key):
+def load_pose_hdf5(instance_ds):
     pose_ds = instance_ds["pose"][()]
     pose = pose_ds.decode("utf-8")
 
@@ -23,21 +22,12 @@ def load_pose_hdf5(instance_ds, key):
         return np.asarray(lines).astype(np.float32).squeeze()
 
 
-def square_crop_img(img):
-    min_dim = np.amin(img.shape[:2])
-    center_coord = np.array(img.shape[:2]) // 2
-    img = img[
-        center_coord[0] - min_dim // 2 : center_coord[0] + min_dim // 2,
-        center_coord[1] - min_dim // 2 : center_coord[1] + min_dim // 2,
-    ]
-    return img
-
-
 def glob_imgs(path):
     imgs = []
     for ext in ["*.png", "*.jpg", "*.JPEG", "*.JPG"]:
         imgs.extend(glob(os.path.join(path, ext)))
     return imgs
+
 
 def visualize_data(filepath):
     with h5py.File(filepath, "r") as file:

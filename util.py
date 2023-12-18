@@ -333,3 +333,94 @@ def assemble_model_input(context, query, gpu=True):
     if gpu:
         model_input = dict_to_gpu(model_input)
     return model_input
+
+
+# Trainer class
+class Trainer:
+    # Initializing parameters
+    def __init__(self, model, optimizers, loss_fn, val_loss_fn, opt, rank=0):
+        self.model = model
+        self.opt = opt
+        self.optimizers = optimizers
+        self.loss_fn = loss_fn
+        self.val_loss_fn = val_loss_fn
+        self.rank = rank
+
+    # Syncing model trained on multiple GPUs
+    def sync_model(self):
+        for param in self.model.parameters():
+            dist.broadcast(param.data, 0)
+
+    # Dataloader callback
+    def dataloader_callback(self, sidelength, batch_size, query_sparsity):
+        train_dataset = hdf5_dataio.SceneClassDataset(
+            num_context=0,
+            num_trgt_samples=self.opt.num_trgt_samples,
+            data_root=self.opt.data_root,
+            query_sparsity=query_sparsity,
+            img_sidelength=sidelength,
+            vary_context_number=True,
+            cache=self.opt.cache,
+            max_num_instances=self.opt.max_num_instances,
+        )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=0,
+        )
+        return train_loader
+
+    # Training function
+    def train(self, gpu):
+        if self.opt.gpus > 1:
+            dist.init_process_group(
+                backend="nccl",
+                init_method="tcp://localhost:1492",
+                world_size=self.opt.gpus,
+                rank=gpu,
+            )
+
+        # Fit the model to the device type
+        self.model.to(self.opt.device)
+
+        if self.opt.checkpoint_path is not None:
+            state_dict = torch.load(self.opt.checkpoint_path)
+            self.model.load_state_dict(state_dict)
+
+        # Sync the model if multiple GPUs are used
+        if self.opt.gpus > 1:
+            self.sync_model()
+
+        # Summarize outputs function
+        summary_fn = summaries.img_summaries
+
+        # Root path for logging
+        root_path = os.path.join(self.opt.logging_root, self.opt.experiment_name)
+
+        # Run the multiscale training function
+        training.multiscale_training(
+            model=self.model,
+            dataloader_callback=self.dataloader_callback,
+            dataloader_iters=(10000, 500000),
+            dataloader_params=(
+                (self.opt.sidelens[0], self.opt.batch_sizes[0], None),
+                (self.opt.sidelens[1], self.opt.batch_sizes[1], None),
+            ),
+            epochs=self.opt.num_epochs,
+            lr=self.opt.lr,
+            steps_til_summary=self.opt.steps_til_summary,
+            epochs_til_checkpoint=self.opt.epochs_til_ckpt,
+            model_dir=root_path,
+            loss_fn=self.loss_fn,
+            val_loss_fn=self.val_loss_fn,
+            iters_til_checkpoint=self.opt.iters_til_ckpt,
+            summary_fn=summary_fn,
+            overwrite=True,
+            optimizers=self.optimizers,
+            rank=gpu,
+            train_function=training.train,
+            gpus=self.opt.gpus,
+            device=self.opt.device,
+        )
