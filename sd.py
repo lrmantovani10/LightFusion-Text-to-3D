@@ -2,6 +2,7 @@ import torch, os, promptStyles, tomesd
 from diffusers import StableDiffusionXLPipeline, DPMSolverMultistepScheduler
 import numpy as np
 import h5py
+import util
 
 base_model = "stabilityai/stable-diffusion-xl-base-1.0"
 refiner_model = "stabilityai/stable-diffusion-xl-refiner-1.0"
@@ -146,12 +147,10 @@ def generate_images(
 
     # Define the image folder
     image_folder = "image_data/"
-    if not os.path.exists(image_folder):
-        os.makedirs(image_folder)
+    util.cond_mkdir(image_folder)
 
     generated_images_folder = image_folder + "generated_images/"
-    if not os.path.exists(generated_images_folder):
-        os.makedirs(generated_images_folder)
+    util.cond_mkdir(generated_images_folder)
 
     prompt += ", in the center of a blank background"
     # Add style to prompt

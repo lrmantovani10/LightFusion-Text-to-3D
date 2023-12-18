@@ -117,3 +117,6 @@ torchmeta/
 
 # SD Testing file
 Content_Generation.ipynb
+
+# DS_Store
+.DS_Store

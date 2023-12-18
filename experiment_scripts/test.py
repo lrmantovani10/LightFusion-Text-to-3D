@@ -85,7 +85,9 @@ def get_psnr(p, trgt):
     ssim = skimage.metrics.structural_similarity(
         p, trgt, multichannel=True, data_range=1, win_size=7, channel_axis=2
     )
-    psnr = skimage.metrics.structural_similarity(p, trgt, data_range=1, win_size=7, channel_axis=2)
+    psnr = skimage.metrics.structural_similarity(
+        p, trgt, data_range=1, win_size=7, channel_axis=2
+    )
 
     return psnr, ssim
 

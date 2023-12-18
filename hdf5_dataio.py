@@ -24,12 +24,12 @@ class SceneInstanceDatasetHDF5(torch.utils.data.Dataset):
         self.instance_ds = instance_ds
         self.has_depth = False
 
-        self.color_key = instance_ds["rgb"][()]
-        self.pose_key = instance_ds["pose"][()]
+        self.colors = instance_ds["rgb"][()]
+        self.poses = instance_ds["pose"][()]
         self.instance_name = instance_name
 
-        image = data_util.load_rgb_hdf5(self.instance_ds, self.color_key)
-        self.org_sidelength = image.shape[1]
+        images = self.colors.astype(np.float64)
+        self.org_sidelength = images.shape[1]
 
         if self.org_sidelength < self.img_sidelength:
             uv = (
@@ -67,8 +67,8 @@ class SceneInstanceDatasetHDF5(torch.utils.data.Dataset):
         if (self.cache is not None) and (key in self.cache):
             rgb, pose = self.cache[key]
         else:
-            rgb = data_util.load_rgb_hdf5(self.instance_ds, self.color_key)
-            pose = data_util.load_pose_hdf5(self.instance_ds, self.pose_key)
+            rgb = self.colors.astype(np.float64)
+            pose = data_util.load_pose_hdf5(self.instance_ds, self.poses)
 
             if (self.cache is not None) and (key not in self.cache):
                 self.cache[key] = rgb, pose
