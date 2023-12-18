@@ -7,7 +7,7 @@ base_model = "stabilityai/stable-diffusion-xl-base-1.0"
 refiner_model = "stabilityai/stable-diffusion-xl-refiner-1.0"
 
 # Fast mode - slightly lower quality tradeoff
-fast_mode = False
+fast_mode = True
 
 # Check if CUDA is available
 cuda_there = False
@@ -25,13 +25,13 @@ elif torch.backends.mps.is_available():
 
 pipe_base = StableDiffusionXLPipeline.from_pretrained(
     base_model,
-    torch_dtype=(torch.float16 if fast_mode else torch.float32),
+    torch_dtype=torch.float32,
     revision="main",
 )
 
 pipe_refiner = StableDiffusionXLPipeline.from_pretrained(
     refiner_model,
-    torch_dtype=(torch.float16 if fast_mode else torch.float32),
+    torch_dtype=torch.float32,
     revision="main",
 )
 
@@ -63,7 +63,8 @@ for pipe in [pipe_base, pipe_refiner]:
         pipe = pipe.to("cuda")
     elif mps_there:
         print("Using MPS")
-        pipe = pipe.to("mps")
+        # Uncomment this to use MPS on a Mac instead of CPU (may run into memory shortage issues, but if there is enough memory that can be allocated, will be much faster than CPU)
+        # pipe = pipe.to("mps")
     else:
         print("Using CPU")
         pipe.to("cpu")
@@ -152,7 +153,7 @@ def generate_images(
     if not os.path.exists(generated_images_folder):
         os.makedirs(generated_images_folder)
 
-    prompt += ", in the center of a blank background, only a single figure"
+    prompt += ", in the center of a blank background"
     # Add style to prompt
     if style:
         try:
@@ -164,7 +165,7 @@ def generate_images(
 
     # What we do not want to see
     negative_prompt = (
-        "assymetric measures, unrecognizable distortions, blurry, disfigured, multiple objects, not full body, no color, non blank background, non photorealistic, toy, deformed, blurry, bad anatomy, disfigured, poorly drawn face, mutation, mutated, extra limb, ugly, poorly drawn hands, missing limb, blurry, floating limbs, disconnected limbs, malformed hands, blur, out of focus, long neck, long body, ((((mutated hands and fingers)))), (((out of frame))), cartoon, 3d, (disfigured), (bad art), (deformed), (poorly drawn), (extra limbs), strange colours, blurry, boring, sketch, lacklustre, repetitive, cropped, hands"
+        "assymetric measures, unrecognizable distortions, blurry, disfigured, small, not full body, no vibarant colors, not blank background, toy, deformed, blurry, bad anatomy, disfigured, poorly drawn face, mutation, mutated, extra limb, ugly, poorly drawn hands, missing limb, blurry, floating limbs, disconnected limbs, malformed hands, blur, out of focus, long neck, long body, ((((mutated hands and fingers)))), (((out of frame))), cartoon, 3d, (disfigured), (bad art), (deformed), (poorly drawn), (extra limbs), strange colours, blurry, boring, sketch, lacklustre, repetitive, cropped, hands"
         + ((", " + initial_negative_prompt) if initial_negative_prompt else "")
     )
 
@@ -201,7 +202,10 @@ def generate_images(
     # Latent generation with a fixed seed so that we ensure that
     # the generated images are similar
     generator = torch.Generator(device=device)
-    seed = generator.seed()
+    # For a random seed, run the code below. The one I am using works well for a single image generation with a blank background 
+    # seed = generator.seed()
+    #seed = 9694010081921693614
+    seed = 3087756310308088877
     print("Seed used: " + str(seed))
     generator = generator.manual_seed(seed)
 
@@ -216,9 +220,9 @@ def generate_images(
         for row in pose_data:
             image_pose += " ".join([str(num) for num in row]) + "\n"
 
-        if not first_image:
+        if first_image is None:
             # Include pose in propmpt
-            pose_prompt = prompt + ", viewed from the " + pose + " position."
+            pose_prompt = prompt + ", viewed from the " + pose + " position"
 
             latents = torch.randn(
                 (1, pipe_base.unet.config.in_channels, height // 8, width // 8),
@@ -234,7 +238,8 @@ def generate_images(
                 negative_prompt=negative_prompt,
                 latents=latents,
             ).images[0]
-            first_image = image
+
+            first_image = np.array(image)
 
         else:
             pose_prompt = (
