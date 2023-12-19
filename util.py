@@ -1,142 +1,48 @@
+import imageio
 import torch.nn.functional as F
 import geometry
 import os
 import numpy as np
 import torch
 import collections
+import h5py
+import glob
+import matplotlib
+import util
+import torchvision
+import skimage
+
+
+def load_rgb_hdf5(instance_ds, key):
+    rgb_ds = instance_ds["rgb"]
+    s = rgb_ds[key][...].tostring()
+    img = s.decode("utf-8")
+    img = skimage.img_as_float32(img)
+
+    # Normalization
+    img -= 0.5
+    img *= 2.0
+
+    return img
+
+
+def load_pose_hdf5(instance_ds, key):
+    pose_ds = instance_ds["pose"]
+    s = pose_ds[key][...].tostring()
+    s = s.decode("utf-8")
+    lines = s.splitlines()
+    lines = [[x[0], x[1], x[2], x[3]] for x in (x.split(" ") for x in lines[:4])]
+    return np.asarray(lines).astype(np.float32).squeeze()
 
 
 def parse_intrinsics_hdf5(raw_data, trgt_sidelength=None, invert_y=False):
     s = raw_data[...].tostring()
-    s = s.decode('utf-8')
+    s = s.decode("utf-8")
 
-    lines = s.split('\n')
+    lines = s.split("\n")
 
-    f, cx, cy, _ = map(float, lines[0].split())
-    grid_barycenter = torch.Tensor(list(map(float, lines[1].split())))
-    height, width = map(float, lines[3].split())
-
-    try:
-        world2cam_poses = int(lines[4])
-    except ValueError:
-        world2cam_poses = None
-
-    if world2cam_poses is None:
-        world2cam_poses = False
-
-    world2cam_poses = bool(world2cam_poses)
-
-    if trgt_sidelength is not None:
-        cx = cx/width * trgt_sidelength
-        cy = cy/height * trgt_sidelength
-        f = trgt_sidelength / height * f
-
-    fx = f
-    if invert_y:
-        fy = -f
-    else:
-        fy = f
-
-    full_intrinsic = np.array([[fx, 0., cx, 0.],
-                               [0., fy, cy, 0],
-                               [0., 0, 1, 0],
-                               [0, 0, 0, 1]])
-
-    return full_intrinsic, grid_barycenter, world2cam_poses
-
-
-def light_field_point_cloud(light_field_fn, num_samples=64**2):
-    dirs = torch.normal(torch.zeros(1, num_samples, 3), torch.ones(1, num_samples, 3)).cuda()
-    dirs = F.normalize(dirs, dim=-1)
-
-    x = (torch.rand_like(dirs) - 0.5) * 2
-
-    D = 1
-    x_prim = x + D * dirs
-
-    st = torch.zeros(1, num_samples, 2).requires_grad_(True).cuda()
-    max_norm_dcdst = torch.ones_like(st) * 0
-    dcdsts = []
-    for i in range(5):
-        d_prim = torch.normal(torch.zeros(1, num_samples, 3), torch.ones(1, num_samples, 3)).cuda()
-        d_prim = F.normalize(d_prim, dim=-1)
-
-        a = x + st[..., :1] * d_prim
-        b = x_prim + st[..., 1:] * d_prim
-        v_dir = b - a
-        v_mom = torch.cross(a, b, dim=-1)
-        v_norm = torch.cat((v_dir, v_mom), dim=-1) / v_dir.norm(dim=-1, keepdim=True)
-
-        with torch.enable_grad():
-            c = light_field_fn(v_norm)
-            dcdst = gradient(c, st)
-            dcdsts.append(dcdst)
-            criterion = max_norm_dcdst.norm(dim=-1, keepdim=True)<dcdst.norm(dim=-1, keepdim=True)
-            max_norm_dcdst = torch.where(criterion, dcdst, max_norm_dcdst)
-
-    dcdsts = torch.stack(dcdsts, dim=0)
-    dcdt = dcdsts[..., 1:]
-    dcds = dcdsts[..., :1]
-
-    d = D * dcdt / (dcds + dcdt)
-    mask = d.std(dim=0) > 1e-2
-    d = d.mean(0)
-    d[mask] = 0.
-    d[max_norm_dcdst.norm(dim=-1)<1] = 0.
-
-    return {'depth':d, 'points':x + d * dirs, 'colors':c}
-
-
-def gradient(y, x, grad_outputs=None, create_graph=True):
-    if grad_outputs is None:
-        grad_outputs = torch.ones_like(y)
-    grad = torch.autograd.grad(y, [x], grad_outputs=grad_outputs, create_graph=create_graph)[0]
-    return grad
-
-
-def parse_comma_separated_integers(string):
-    return list(map(int, string.split(',')))
-
-
-def convert_image(img, type):
-    '''Expects single batch dimesion'''
-    img = img.squeeze(0)
-
-    if not 'normal' in type:
-        img = detach_all(lin2img(img, mode='np'))
-
-    if 'rgb' in type or 'normal' in type:
-        img += 1.
-        img /= 2.
-    elif type == 'depth':
-        img = (img - np.amin(img)) / (np.amax(img) - np.amin(img))
-    img *= 255.
-    img = np.clip(img, 0., 255.).astype(np.uint8)
-    return img
-
-
-def flatten_first_two(tensor):
-    b, s, *rest = tensor.shape
-    return tensor.view(b * s, *rest)
-
-
-def parse_intrinsics(filepath, trgt_sidelength=None, invert_y=False):
-    # Get camera intrinsics
-    with open(filepath, 'r') as file:
-        f, cx, cy, _ = map(float, file.readline().split())
-        grid_barycenter = torch.Tensor(list(map(float, file.readline().split())))
-        scale = float(file.readline())
-        height, width = map(float, file.readline().split())
-
-        try:
-            world2cam_poses = int(file.readline())
-        except ValueError:
-            world2cam_poses = None
-
-    if world2cam_poses is None:
-        world2cam_poses = False
-
-    world2cam_poses = bool(world2cam_poses)
+    f, cx, cy = map(float, lines[0].split())
+    height, width = map(float, lines[1].split())
 
     if trgt_sidelength is not None:
         cx = cx / width * trgt_sidelength
@@ -149,22 +55,42 @@ def parse_intrinsics(filepath, trgt_sidelength=None, invert_y=False):
     else:
         fy = f
 
-    # Build the intrinsic matrices
-    full_intrinsic = np.array([[fx, 0., cx, 0.],
-                               [0., fy, cy, 0],
-                               [0., 0, 1, 0],
-                               [0, 0, 0, 1]])
+    full_intrinsic = np.array(
+        [[fx, 0.0, cx, 0.0], [0.0, fy, cy, 0], [0.0, 0, 1, 0], [0, 0, 0, 1]]
+    )
 
-    return full_intrinsic, grid_barycenter, scale, world2cam_poses
+    return full_intrinsic
 
 
-def num_divisible_by_2(number):
-    i = 0
-    while not number % 2:
-        number = number // 2
-        i += 1
+def gradient(y, x, grad_outputs=None, create_graph=True):
+    if grad_outputs is None:
+        grad_outputs = torch.ones_like(y)
+    grad = torch.autograd.grad(
+        y, [x], grad_outputs=grad_outputs, create_graph=create_graph
+    )[0]
+    return grad
 
-    return i
+
+def convert_image(img, type):
+    """Expects single batch dimesion"""
+    img = img.squeeze(0)
+
+    if not "normal" in type:
+        img = detach_all(lin2img(img, mode="np"))
+
+    if "rgb" in type or "normal" in type:
+        img += 1.0
+        img /= 2.0
+    elif type == "depth":
+        img = (img - np.amin(img)) / (np.amax(img) - np.amin(img))
+    img *= 255.0
+    img = np.clip(img, 0.0, 255.0).astype(np.uint8)
+    return img
+
+
+def flatten_first_two(tensor):
+    b, s, *rest = tensor.shape
+    return tensor.view(b * s, *rest)
 
 
 def cond_mkdir(path):
@@ -172,14 +98,10 @@ def cond_mkdir(path):
         os.makedirs(path)
 
 
-def normalize(img):
-    return (img - img.min()) / (img.max() - img.min())
-
-
-def print_network(net):
-    model_parameters = filter(lambda p: p.requires_grad, net.parameters())
-    params = sum([np.prod(p.size()) for p in model_parameters])
-    print("%d" % params)
+def pick(list, item_idcs):
+    if not list:
+        return list
+    return [list[i] for i in item_idcs]
 
 
 def add_batch_dim_to_dict(ob):
@@ -200,7 +122,7 @@ def detach_all(tensor):
     return tensor.detach().cpu().numpy()
 
 
-def lin2img(tensor, image_resolution=None, mode='torch'):
+def lin2img(tensor, image_resolution=None, mode="torch"):
     if len(tensor.shape) == 3:
         batch_size, num_samples, channels = tensor.shape
     elif len(tensor.shape) == 2:
@@ -214,14 +136,14 @@ def lin2img(tensor, image_resolution=None, mode='torch'):
         width = image_resolution[1]
 
     if len(tensor.shape) == 3:
-        if mode == 'torch':
+        if mode == "torch":
             tensor = tensor.permute(0, 2, 1).view(batch_size, channels, height, width)
-        elif mode == 'np':
+        elif mode == "np":
             tensor = tensor.view(batch_size, height, width, channels)
     elif len(tensor.shape) == 2:
-        if mode == 'torch':
+        if mode == "torch":
             tensor = tensor.permute(1, 0).view(channels, height, width)
-        elif mode == 'np':
+        elif mode == "np":
             tensor = tensor.view(height, width, channels)
 
     return tensor
@@ -232,13 +154,19 @@ def light_field_depth_map(plucker_coords, cam2world, light_field_fn):
     D = 1
     x_prim = x + D * plucker_coords[..., :3]
 
-    d_prim = torch.normal(torch.zeros_like(plucker_coords[..., :3]), torch.ones_like(plucker_coords[..., :3])).to(
-        plucker_coords.device)
+    d_prim = torch.normal(
+        torch.zeros_like(plucker_coords[..., :3]),
+        torch.ones_like(plucker_coords[..., :3]),
+    ).to(plucker_coords.device)
     d_prim = F.normalize(d_prim, dim=-1)
 
     dcdsts = []
     for i in range(5):
-        st = ((torch.rand_like(plucker_coords[..., :2]) - 0.5) * 1e-2).requires_grad_(True).to(plucker_coords.device)
+        st = (
+            ((torch.rand_like(plucker_coords[..., :2]) - 0.5) * 1e-2)
+            .requires_grad_(True)
+            .to(plucker_coords.device)
+        )
         a = x + st[..., :1] * d_prim
         b = x_prim + st[..., 1:] * d_prim
 
@@ -260,48 +188,16 @@ def light_field_depth_map(plucker_coords, cam2world, light_field_fn):
 
     all_depth_estimates = D * dcdsts[..., 1:] / (dcdsts.sum(dim=-1, keepdim=True))
     all_depth_estimates[torch.abs(dcdsts.sum(dim=-1)) < 5] = 0
-    all_depth_estimates[all_depth_estimates<0] = 0.
+    all_depth_estimates[all_depth_estimates < 0] = 0.0
 
     dcdsts_var = torch.std(dcdsts.norm(dim=-1, keepdim=True), dim=0, keepdim=True)
     depth_var = torch.std(all_depth_estimates, dim=0, keepdim=True)
 
     d = D * dcdt / (dcds + dcdt)
-    d[torch.abs(dcds + dcdt) < 5] = 0.
-    d[d<0] = 0.
-    d[depth_var[0, ..., 0] > 0.01] = 0.
-    return {'depth':d, 'points':x + d * plucker_coords[..., :3]}
-
-
-def pick(list, item_idcs):
-    if not list:
-        return list
-    return [list[i] for i in item_idcs]
-
-
-def get_mgrid(sidelen, dim=2, flatten=False):
-    '''Generates a flattened grid of (x,y,...) coordinates in a range of -1 to 1.'''
-    if isinstance(sidelen, int):
-        sidelen = dim * (sidelen,)
-
-    if dim == 2:
-        pixel_coords = np.stack(np.mgrid[:sidelen[0], :sidelen[1]], axis=-1)[None, ...].astype(np.float32)
-        pixel_coords[0, :, :, 0] = pixel_coords[0, :, :, 0] / (sidelen[0] - 1)
-        pixel_coords[0, :, :, 1] = pixel_coords[0, :, :, 1] / (sidelen[1] - 1)
-    elif dim == 3:
-        pixel_coords = np.stack(np.mgrid[:sidelen[0], :sidelen[1], :sidelen[2]], axis=-1)[None, ...].astype(np.float32)
-        pixel_coords[..., 0] = pixel_coords[..., 0] / max(sidelen[0] - 1, 1)
-        pixel_coords[..., 1] = pixel_coords[..., 1] / (sidelen[1] - 1)
-        pixel_coords[..., 2] = pixel_coords[..., 2] / (sidelen[2] - 1)
-    else:
-        raise NotImplementedError('Not implemented for dim=%d' % dim)
-
-    pixel_coords -= 0.5
-    pixel_coords *= 2.
-    pixel_coords = torch.from_numpy(pixel_coords)
-
-    if flatten:
-        pixel_coords = pixel_coords.view(-1, dim)
-    return pixel_coords
+    d[torch.abs(dcds + dcdt) < 5] = 0.0
+    d[d < 0] = 0.0
+    d[depth_var[0, ..., 0] > 0.01] = 0.0
+    return {"depth": d, "points": x + d * plucker_coords[..., :3]}
 
 
 def dict_to_gpu(ob):
@@ -319,8 +215,8 @@ def dict_to_gpu(ob):
 
 
 def assemble_model_input(context, query, gpu=True):
-    context['mask'] = torch.Tensor([1.])
-    query['mask'] = torch.Tensor([1.])
+    context["mask"] = torch.Tensor([1.0])
+    query["mask"] = torch.Tensor([1.0])
 
     context = add_batch_dim_to_dict(context)
     context = add_batch_dim_to_dict(context)
@@ -328,99 +224,121 @@ def assemble_model_input(context, query, gpu=True):
     query = add_batch_dim_to_dict(query)
     query = add_batch_dim_to_dict(query)
 
-    model_input = {'context': context, 'query': query, 'post_input': query}
+    model_input = {"context": context, "query": query, "post_input": query}
 
     if gpu:
         model_input = dict_to_gpu(model_input)
     return model_input
 
 
-# Trainer class
-class Trainer:
-    # Initializing parameters
-    def __init__(self, model, optimizers, loss_fn, val_loss_fn, opt, rank=0):
-        self.model = model
-        self.opt = opt
-        self.optimizers = optimizers
-        self.loss_fn = loss_fn
-        self.val_loss_fn = val_loss_fn
-        self.rank = rank
+def glob_imgs(path):
+    imgs = []
+    for ext in ["*.png", "*.jpg", "*.JPEG", "*.JPG"]:
+        imgs.extend(glob(os.path.join(path, ext)))
+    return imgs
 
-    # Syncing model trained on multiple GPUs
-    def sync_model(self):
-        for param in self.model.parameters():
-            dist.broadcast(param.data, 0)
 
-    # Dataloader callback
-    def dataloader_callback(self, sidelength, batch_size, query_sparsity):
-        train_dataset = hdf5_dataio.SceneClassDataset(
-            num_context=0,
-            num_trgt_samples=self.opt.num_trgt_samples,
-            data_root=self.opt.data_root,
-            query_sparsity=query_sparsity,
-            img_sidelength=sidelength,
-            vary_context_number=True,
-            cache=self.opt.cache,
-            max_num_instances=self.opt.max_num_instances,
-        )
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            drop_last=True,
-            num_workers=0,
-        )
-        return train_loader
+def visualize_data(filepath):
+    with h5py.File(filepath, "r") as file:
+        # Setting the dataset to the first entry in the file
+        for name, item in file.items():
+            print(name, item)
+            dataset = item
+            break
 
-    # Training function
-    def train(self, gpu):
-        if self.opt.gpus > 1:
-            dist.init_process_group(
-                backend="nccl",
-                init_method="tcp://localhost:1492",
-                world_size=self.opt.gpus,
-                rank=gpu,
+        # Viewing the first pose
+        pose = dataset["pose"][()]
+        pose = pose.decode("utf-8")
+        print("Pose\n", pose)
+
+        # Displaying the first image
+        rgb = dataset["rgb"][()]
+
+        # Display the image
+        img = imageio.fromarray(rgb)
+        img.show()
+
+        # Display intrinsics data
+        intrinsics = dataset["intrinsics.txt"]
+        intrinsics = intrinsics[()]
+        intrinsics = intrinsics.decode("utf-8")
+        print("Intrinsics\n", intrinsics)
+
+
+# Testing data visualization with a simple "dragon.hdf5" example
+def test_examples():
+    visualize_data("data/dragon.hdf5")
+
+
+def image_loss(model_out, gt, mask=None):
+    gt_rgb = gt["rgb"]
+    return torch.nn.MSELoss()(gt_rgb, model_out["rgb"]) * 200
+
+
+class LFLoss:
+    def __init__(self, l2_weight=1, reg_weight=1e2):
+        self.l2_weight = l2_weight
+        self.reg_weight = reg_weight
+
+    def __call__(self, model_out, gt, model=None, val=False):
+        loss_dict = {}
+        loss_dict["img_loss"] = image_loss(model_out, gt)
+        loss_dict["reg"] = (model_out["z"] ** 2).mean() * self.reg_weight
+        return loss_dict
+
+
+def img_summaries(
+    model_input,
+    ground_truth,
+    model_output,
+    writer,
+    iter,
+    prefix="",
+    img_shape=None,
+):
+    matplotlib.use("Agg")
+    predictions = model_output["rgb"]
+    trgt_imgs = ground_truth["rgb"]
+    indices = model_input["query"]["instance_idx"]
+
+    predictions = util.flatten_first_two(predictions)
+    trgt_imgs = util.flatten_first_two(trgt_imgs)
+
+    with torch.no_grad():
+        if "context" in model_input and model_input["context"]:
+            context_images = (
+                model_input["context"]["rgb"]
+                * model_input["context"]["mask"][..., None]
+            )
+            context_images = util.lin2img(
+                util.flatten_first_two(context_images), image_resolution=img_shape
+            )
+            writer.add_image(
+                prefix + "context_images",
+                torchvision.utils.make_grid(
+                    context_images, scale_each=False, normalize=True
+                )
+                .cpu()
+                .numpy(),
+                iter,
             )
 
-        # Fit the model to the device type
-        self.model.to(self.opt.device)
-
-        if self.opt.checkpoint_path is not None:
-            state_dict = torch.load(self.opt.checkpoint_path)
-            self.model.load_state_dict(state_dict)
-
-        # Sync the model if multiple GPUs are used
-        if self.opt.gpus > 1:
-            self.sync_model()
-
-        # Summarize outputs function
-        summary_fn = summaries.img_summaries
-
-        # Root path for logging
-        root_path = os.path.join(self.opt.logging_root, self.opt.experiment_name)
-
-        # Run the multiscale training function
-        training.multiscale_training(
-            model=self.model,
-            dataloader_callback=self.dataloader_callback,
-            dataloader_iters=(10000, 500000),
-            dataloader_params=(
-                (self.opt.sidelens[0], self.opt.batch_sizes[0], None),
-                (self.opt.sidelens[1], self.opt.batch_sizes[1], None),
-            ),
-            epochs=self.opt.num_epochs,
-            lr=self.opt.lr,
-            steps_til_summary=self.opt.steps_til_summary,
-            epochs_til_checkpoint=self.opt.epochs_til_ckpt,
-            model_dir=root_path,
-            loss_fn=self.loss_fn,
-            val_loss_fn=self.val_loss_fn,
-            iters_til_checkpoint=self.opt.iters_til_ckpt,
-            summary_fn=summary_fn,
-            overwrite=True,
-            optimizers=self.optimizers,
-            rank=gpu,
-            train_function=training.train,
-            gpus=self.opt.gpus,
-            device=self.opt.device,
+        output_vs_gt = torch.cat((predictions, trgt_imgs), dim=0)
+        output_vs_gt = util.lin2img(output_vs_gt, image_resolution=img_shape)
+        writer.add_image(
+            prefix + "output_vs_gt",
+            torchvision.utils.make_grid(output_vs_gt, scale_each=False, normalize=True)
+            .cpu()
+            .detach()
+            .numpy(),
+            iter,
         )
+
+        writer.add_scalar(prefix + "out_min", predictions.min(), iter)
+        writer.add_scalar(prefix + "out_max", predictions.max(), iter)
+
+        writer.add_scalar(prefix + "trgt_min", trgt_imgs.min(), iter)
+        writer.add_scalar(prefix + "trgt_max", trgt_imgs.max(), iter)
+
+        writer.add_scalar(prefix + "idx_min", indices.min(), iter)
+        writer.add_scalar(prefix + "idx_max", indices.max(), iter)

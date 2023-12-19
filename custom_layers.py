@@ -1,8 +1,6 @@
 import numpy as np
-import geometry
 from torchmeta.modules import MetaModule, MetaSequential
 from collections import OrderedDict
-
 import torch
 from torch import nn
 
@@ -11,14 +9,6 @@ def init_weights_normal(m):
     if type(m) == BatchLinear or type(m) == nn.Linear:
         if hasattr(m, "weight"):
             nn.init.kaiming_normal_(m.weight, a=0.0, nonlinearity="relu", mode="fan_in")
-
-
-def first_layer_sine_init(m):
-    with torch.no_grad():
-        if hasattr(m, "weight"):
-            num_input = m.weight.size(-1)
-            # See paper sec. 3.2, final paragraph, and supplement Sec. 1.5 for discussion of factor 30
-            m.weight.uniform_(-1 / num_input, 1 / num_input)
 
 
 class BatchLinear(nn.Linear, MetaModule):

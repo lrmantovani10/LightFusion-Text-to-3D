@@ -1,6 +1,7 @@
 # Enable import from parent package
 import sys
 import os
+import util
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -13,12 +14,9 @@ from multiprocessing import Manager
 import torch
 import models
 import training
-import summaries
 import hdf5_dataio
 import configargparse
 from torch.utils.data import DataLoader
-import loss_functions
-import config
 
 p = configargparse.ArgumentParser()
 p.add(
@@ -32,7 +30,7 @@ p.add(
 p.add_argument(
     "--logging_root",
     type=str,
-    default=config.logging_root,
+    default=".lfn_logs/",
     required=False,
     help="root for logging",
 )
@@ -96,9 +94,9 @@ def multigpu_train(gpu, opt, cache):
         sync_model(model)
 
     # Define the loss
-    summary_fn = summaries.img_summaries
+    summary_fn = util.img_summaries
     root_path = os.path.join(opt.logging_root, opt.experiment_name)
-    loss_fn = val_loss_fn = loss_functions.LFLoss(reg_weight=1)
+    loss_fn = val_loss_fn = util.LFLoss(reg_weight=1)
 
     # only optimize latent codes
     latent_params = [

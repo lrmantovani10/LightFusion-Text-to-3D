@@ -65,15 +65,20 @@ num_steps = 100
 
 
 # Function to generate the camera intrinsics parameters
-def generate_intrinsics(fovy, width, height):
+def generate_intrinsics(width, height):
     """
     The camera intrinsics are represented in the following notation:
     (line 1) f (or fx), cx, cy
     (line 2) height, width
+
+    Here, we use a camera approximation that has a 60 degree field of view and
+    sensor size (in pixels) equal to twice the image width. Feel free to change these estimated values in your approximation.
     """
     cx = width / 2
     cy = height / 2
-    focal = width / (2 * np.tan(np.deg2rad(fovy) / 2))
+    fovy = 60
+    sensor_size_estimation = 2 * width
+    focal = sensor_size_estimation / (2 * np.tan(np.deg2rad(fovy) / 2))
     intrinsics = np.array([focal, cx, cy])
     image_intrinsics = " ".join([str(num) for num in intrinsics])
     image_intrinsics += str(height) + " " + str(width) + "\n"
@@ -85,10 +90,10 @@ def rotation_matrix_from_euler(roll, pitch, yaw):
     """
     Create a rotation matrix from Euler angles (roll, pitch, yaw).
 
-    :param roll: Rotation angle around the x-axis in radians.
-    :param pitch: Rotation angle around the y-axis in radians.
-    :param yaw: Rotation angle around the z-axis in radians.
-    :return: A 3x3 rotation matrix.
+    roll: Rotation angle around the x-axis in radians.
+    pitch: Rotation angle around the y-axis in radians.
+    yaw: Rotation angle around the z-axis in radians.
+    returns aA 3x3 rotation matrix.
     """
     R_x = np.array(
         [[1, 0, 0], [0, np.cos(roll), -np.sin(roll)], [0, np.sin(roll), np.cos(roll)]]
@@ -129,7 +134,6 @@ def generate_extrinsics(rotation):
 
 def generate_images(
     prompt,
-    fovy=45,
     width=None,
     height=None,
     style=None,
@@ -143,7 +147,6 @@ def generate_images(
     if not height:
         height = 768
 
-    final_width = final_height = 128
     image_folder = "image_data/"
     util.cond_mkdir(image_folder)
 
@@ -258,9 +261,8 @@ def generate_images(
 
         gen_folder_len += 1
         image.save(generated_images_folder + str(gen_folder_len) + ".png")
-        image = image.resize((final_width, final_height))
+        # Image is resized later, when fetched
         img_array = np.array(image).encode("utf-8")
-
         image_pose = generate_extrinsics(rotations[i])
 
         img_arrays.append(img_array)
@@ -270,7 +272,7 @@ def generate_images(
         group = file.create_group("instance_" + str(num_equal_images + 1))
 
         print("Generating camera intrinsics")
-        image_intrinsics = generate_intrinsics(fovy, width, height)
+        image_intrinsics = generate_intrinsics(width, height)
 
         rgbs_data = group.create_group("rgb")
         poses_data = group.create_group("pose")

@@ -159,50 +159,6 @@ class HyperNetwork(nn.Module):
         return params
 
 
-class FILMNetwork(nn.Module):
-    def __init__(self, hypo_module, latent_dim, num_hidden=3):
-        """
-
-        Args:
-            hyper_in_features: In features of hypernetwork
-            hyper_hidden_layers: Number of hidden layers in hypernetwork
-            hyper_hidden_features: Number of hidden units in hypernetwork
-            hypo_module: MetaModule. The module whose parameters are predicted.
-        """
-        super().__init__()
-
-        hypo_parameters = hypo_module.meta_named_parameters()
-
-        self.names = []
-        self.nets = nn.ModuleList()
-        self.param_shapes = []
-        for name, param in hypo_parameters:
-            self.names.append(name)
-            self.param_shapes.append(param.size())
-
-            hn = custom_layers.FCBlock(
-                in_features=latent_dim,
-                out_features=int(2 * torch.tensor(param.shape[0])),
-                num_hidden_layers=num_hidden,
-                hidden_ch=latent_dim,
-                outermost_linear=True,
-                nonlinearity="relu",
-            )
-            # hn.net[-1].apply(lambda m: hyper_weight_init(m, param.size()[-1]))
-            self.nets.append(hn)
-
-    def forward(self, z):
-        params = []
-        for name, net, param_shape in zip(self.names, self.nets, self.param_shapes):
-            net_out = net(z)
-            layer_params = {}
-            layer_params["gamma"] = net_out[:, : param_shape[0]].unsqueeze(1) + 1
-            layer_params["beta"] = net_out[:, param_shape[0] :].unsqueeze(1)
-            params.append(layer_params)
-
-        return params
-
-
 ############################
 # Initialization scheme
 def hyper_weight_init(m, in_features_main_net, siren=False):

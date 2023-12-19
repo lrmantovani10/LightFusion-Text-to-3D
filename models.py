@@ -3,10 +3,8 @@ import time
 import torch
 import torch.nn as nn
 import numpy as np
-
+import torchvision
 import util
-
-import conv_modules
 import custom_layers
 import geometry
 import hyperlayers
@@ -220,22 +218,45 @@ class LFAutoDecoder(LightFieldModel):
         return z
 
 
-class LFEncoder(LightFieldModel):
-    def __init__(
-        self,
-        latent_dim,
-        num_instances,
-        parameterization="plucker",
-        conditioning="hyper",
-    ):
-        super().__init__(latent_dim, parameterization, conditioning="low_rank")
-        self.num_instances = num_instances
-        self.encoder = conv_modules.Resnet18(c_dim=latent_dim)
+def normalize_imagenet(x):
+    """Normalize input images according to ImageNet standards.
 
-    def get_z(self, input, val=False):
-        n_qry = input["query"]["uv"].shape[1]
-        rgb = util.lin2img(util.flatten_first_two(input["context"]["rgb"]))
-        z = self.encoder(rgb)
-        z = z.unsqueeze(1).repeat(1, n_qry, 1)
-        z *= 1e-2
-        return z
+    Args:
+        x (tensor): input images
+    """
+    x = x.clone()
+    x[:, 0] = (x[:, 0] - 0.485) / 0.229
+    x[:, 1] = (x[:, 1] - 0.456) / 0.224
+    x[:, 2] = (x[:, 2] - 0.406) / 0.225
+    return x
+
+
+class Resnet18(nn.Module):
+    r"""ResNet-18 encoder network for image input.
+    Args:
+        c_dim (int): output dimension of the latent embedding
+        normalize (bool): whether the input images should be normalized
+        use_linear (bool): whether a final linear layer should be used
+    """
+
+    def __init__(self, c_dim, normalize=True, use_linear=True):
+        super().__init__()
+        self.normalize = normalize
+        self.use_linear = use_linear
+        self.features = torchvision.models.resnet18(pretrained=True)
+        self.features.fc = nn.Sequential()
+        if use_linear:
+            self.fc = nn.Linear(512, c_dim)
+            self.fc.apply(custom_layers.init_weights_normal)
+        elif c_dim == 512:
+            self.fc = nn.Sequential()
+        else:
+            raise ValueError("c_dim must be 512 if use_linear is False")
+
+    def forward(self, input):
+        x = (input + 1) / 2
+        if self.normalize:
+            x = normalize_imagenet(x)
+        net = self.features(x)
+        out = self.fc(net)
+        return out

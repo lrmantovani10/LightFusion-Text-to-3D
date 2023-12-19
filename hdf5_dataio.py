@@ -1,7 +1,6 @@
 import cv2
 import torch
 import numpy as np
-import data_util
 import util
 from collections import defaultdict
 import h5py
@@ -14,6 +13,8 @@ class SceneInstanceDatasetHDF5(torch.utils.data.Dataset):
         instance_ds,
         img_sidelength,
         instance_name,
+        specific_observation_idcs=None,
+        num_images=None,
         cache=None,
     ):
         self.instance_idx = instance_idx
@@ -22,12 +23,22 @@ class SceneInstanceDatasetHDF5(torch.utils.data.Dataset):
         self.instance_ds = instance_ds
         self.has_depth = False
 
-        self.colors = instance_ds["rgb"][()]
-        self.poses = instance_ds["pose"][()]
+        self.color_keys = sorted(list(instance_ds["rgb"].keys()))
+        self.pose_keys = sorted(list(instance_ds["pose"].keys()))
         self.instance_name = instance_name
 
-        images = self.colors.astype(np.float64)
-        self.org_sidelength = images.shape[1]
+        if specific_observation_idcs is not None:
+            self.color_keys = util.pick(self.color_keys, specific_observation_idcs)
+            self.pose_keys = util.pick(self.pose_keys, specific_observation_idcs)
+        elif num_images is not None:
+            idcs = np.linspace(
+                0, stop=len(self.color_keys), num=num_images, endpoint=False, dtype=int
+            )
+            self.color_keys = util.pick(self.color_keys, idcs)
+            self.pose_keys = util.pick(self.pose_keys, idcs)
+
+        dummy_img = util.load_rgb_hdf5(self.instance_ds, self.color_keys[0])
+        self.org_sidelength = dummy_img.shape[1]
 
         if self.org_sidelength < self.img_sidelength:
             uv = (
@@ -35,7 +46,7 @@ class SceneInstanceDatasetHDF5(torch.utils.data.Dataset):
                 .astype(np.int32)
                 .transpose(1, 2, 0)
             )
-            self.intrinsics, _, _ = util.parse_intrinsics_hdf5(
+            self.intrinsics = util.parse_intrinsics_hdf5(
                 instance_ds["intrinsics.txt"], trgt_sidelength=self.img_sidelength
             )
         else:
@@ -49,7 +60,7 @@ class SceneInstanceDatasetHDF5(torch.utils.data.Dataset):
                 (self.img_sidelength, self.img_sidelength),
                 interpolation=cv2.INTER_NEAREST,
             )
-            self.intrinsics, _, _ = util.parse_intrinsics_hdf5(
+            self.intrinsics = util.parse_intrinsics_hdf5(
                 instance_ds["intrinsics.txt"], trgt_sidelength=self.org_sidelength
             )
 
@@ -58,15 +69,15 @@ class SceneInstanceDatasetHDF5(torch.utils.data.Dataset):
         self.intrinsics = torch.from_numpy(self.intrinsics).float()
 
     def __len__(self):
-        return 1
+        return min(len(self.pose_keys), len(self.color_keys))
 
     def __getitem__(self, idx):
         key = f"{self.instance_idx}_{idx}"
         if (self.cache is not None) and (key in self.cache):
             rgb, pose = self.cache[key]
         else:
-            rgb = self.colors.astype(np.float64)
-            pose = data_util.load_pose_hdf5(self.instance_ds, self.poses)
+            rgb = util.load_rgb_hdf5(self.instance_ds, self.color_keys[idx])
+            pose = util.load_pose_hdf5(self.instance_ds, self.pose_keys[idx])
 
             if (self.cache is not None) and (key not in self.cache):
                 self.cache[key] = rgb, pose
@@ -98,8 +109,10 @@ def get_num_instances(data_root):
 def get_instance_datasets_hdf5(
     root,
     max_num_instances=None,
+    specific_observation_idcs=None,
     cache=None,
     sidelen=None,
+    max_observations_per_instance=None,
     start_idx=0,
 ):
     file = h5py.File(root, "r")
@@ -113,7 +126,9 @@ def get_instance_datasets_hdf5(
         SceneInstanceDatasetHDF5(
             instance_idx=idx + start_idx,
             instance_ds=file[instance_name],
+            specific_observation_idcs=specific_observation_idcs,
             img_sidelength=sidelen,
+            num_images=max_observations_per_instance,
             cache=cache,
             instance_name=instance_name,
         )
@@ -134,6 +149,8 @@ class SceneClassDataset(torch.utils.data.Dataset):
         query_sparsity=None,
         img_sidelength=None,
         max_num_instances=None,
+        max_observations_per_instance=None,
+        specific_observation_idcs=None,
         test=False,
         test_context_idcs=None,
         cache=None,
@@ -150,8 +167,10 @@ class SceneClassDataset(torch.utils.data.Dataset):
         self.all_instances = get_instance_datasets_hdf5(
             data_root,
             max_num_instances=max_num_instances,
+            specific_observation_idcs=specific_observation_idcs,
             cache=cache,
             sidelen=img_sidelength,
+            max_observations_per_instance=max_observations_per_instance,
             start_idx=start_idx,
         )
 
@@ -169,7 +188,7 @@ class SceneClassDataset(torch.utils.data.Dataset):
             for key in ["rgb", "uv"]:
                 new_dict[key] = dict[key][rand_idcs]
 
-            for key, _ in dict.items():
+            for key in dict.keys():
                 if key not in ["rgb", "uv"]:
                     new_dict[key] = dict[key]
 

@@ -1,270 +1,273 @@
-"""Implements a generic training loop.
-"""
-
 import os
+import hdf5_dataio
 import shutil
 from collections import defaultdict
 
 import numpy as np
 import torch
 import torch.distributed as dist
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-
 import util
 
 
-def average_gradients(model):
-    """Averages gradients across workers"""
-    size = float(dist.get_world_size())
+class Trainer:
+    def __init__(self, model, optimizers, loss_fn, val_loss_fn, opt, rank=0):
+        self.model = model
+        self.opt = opt
+        self.optimizers = optimizers
+        self.loss_fn = loss_fn
+        self.val_loss_fn = val_loss_fn
+        self.rank = rank
+        self.root_path = os.path.join(self.opt.logging_root, self.opt.experiment_name)
 
-    for param in model.parameters():
-        if param.grad is not None:
-            dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-            param.grad.data /= size
+    def sync_model(self):
+        for param in self.model.parameters():
+            dist.broadcast(param.data, 0)
 
+    def average_gradients(self):
+        """Averages gradients across workers"""
+        size = float(dist.get_world_size())
 
-def multiscale_training(
-    train_function, dataloader_callback, dataloader_iters, dataloader_params, device,**kwargs
-):
-    model = kwargs.pop("model", None)
-    optimizers = kwargs.pop("optimizers", None)
-    org_model_dir = kwargs.pop("model_dir", None)
+        for param in self.model.parameters():
+            if param.grad is not None:
+                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                param.grad.data /= size
 
-    for params, max_steps in zip(dataloader_params, dataloader_iters):
-        dataloaders = dataloader_callback(*params)
-        model_dir = os.path.join(org_model_dir, "_".join(map(str, params)))
-
-        model, optimizers = train_function(
-            dataloaders=dataloaders,
-            model_dir=model_dir,
-            model=model,
-            optimizers=optimizers,
-            max_steps=max_steps,
-            device=device,
-            **kwargs,
+    def dataloader_callback(self, sidelength, batch_size, query_sparsity):
+        train_dataset = hdf5_dataio.SceneClassDataset(
+            num_context=0,
+            num_trgt_samples=self.opt.num_trgt_samples,
+            data_root=self.opt.data_root,
+            query_sparsity=query_sparsity,
+            img_sidelength=sidelength,
+            vary_context_number=True,
+            cache=self.opt.cache,
+            max_num_instances=self.opt.max_num_instances,
         )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=0,
+        )
+        return train_loader
 
+    def train_step(self, rank, overwrite=True):
+        for params, max_steps in zip(self.dataloader_params, self.dataloader_iters):
+            dataloaders = self.dataloader_callback(*params)
+            model_dir = os.path.join(self.root_path, "_".join(map(str, params)))
 
-def train(
-    model,
-    dataloaders,
-    epochs,
-    lr,
-    epochs_til_checkpoint,
-    model_dir,
-    loss_fn,
-    steps_til_summary=1,
-    summary_fn=None,
-    iters_til_checkpoint=None,
-    clip_grad=False,
-    val_loss_fn=None,
-    val_summary_fn=None,
-    overwrite=True,
-    optimizers=None,
-    batches_per_validation=10,
-    gpus=1,
-    rank=0,
-    max_steps=None,
-    loss_schedules=None,
-    device="gpu",
-):
-    if optimizers is None:
-        optimizers = [torch.optim.Adam(lr=lr, params=model.parameters())]
-
-    if isinstance(dataloaders, tuple):
-        train_dataloader, val_dataloader = dataloaders
-        assert (
-            val_loss_fn is not None
-        ), "If validation set is passed, have to pass a validation loss_fn!"
-    else:
-        train_dataloader, val_dataloader = dataloaders, None
-
-    if rank == 0:
-        if os.path.exists(model_dir):
-            if overwrite:
-                shutil.rmtree(model_dir)
+            if isinstance(dataloaders, tuple):
+                train_dataloader, val_dataloader = dataloaders
+                assert (
+                    self.val_loss_fn is not None
+                ), "If validation set is passed, have to pass a validation loss_fn!"
             else:
-                val = input(
-                    "The model directory %s exists. Overwrite? (y/n)" % model_dir
-                )
-                if val == "y" or overwrite:
-                    shutil.rmtree(model_dir)
+                train_dataloader, val_dataloader = dataloaders, None
 
-        os.makedirs(model_dir)
-
-        summaries_dir = os.path.join(model_dir, "summaries")
-        util.cond_mkdir(summaries_dir)
-
-        checkpoints_dir = os.path.join(model_dir, "checkpoints")
-        util.cond_mkdir(checkpoints_dir)
-
-        writer = SummaryWriter(summaries_dir, flush_secs=10)
-
-    total_steps = 0
-    with tqdm(total=len(train_dataloader) * epochs) as pbar:
-        for epoch in range(epochs):
-            if not epoch % epochs_til_checkpoint and epoch and rank == 0:
-                torch.save(
-                    model.state_dict(),
-                    os.path.join(
-                        checkpoints_dir,
-                        "model_epoch_%04d_iter_%06d.pth" % (epoch, total_steps),
-                    ),
-                )
-
-            for step, (model_input, gt) in enumerate(train_dataloader):
-                if device == "gpu":
-                    model_input = util.dict_to_gpu(model_input)
-                    gt = util.dict_to_gpu(gt)
-
-                model_output = model(model_input)
-                losses, loss_summaries = loss_fn(model_output, gt, model=model)
-
-                train_loss = 0.0
-                for loss_name, loss in losses.items():
-                    single_loss = loss.mean()
-
-                    if (loss_schedules is not None) and (loss_name in loss_schedules):
-                        if rank == 0:
-                            writer.add_scalar(
-                                loss_name + "_weight",
-                                loss_schedules[loss_name](total_steps),
-                                total_steps,
-                            )
-                        single_loss *= loss_schedules[loss_name](total_steps)
-
-                    if rank == 0:
-                        writer.add_scalar(loss_name, single_loss, total_steps)
-                    train_loss += single_loss
-
-                if rank == 0:
-                    writer.add_scalar("total_train_loss", train_loss, total_steps)
-
-                if not total_steps % steps_til_summary and rank == 0:
-                    torch.save(
-                        model.state_dict(),
-                        os.path.join(checkpoints_dir, "model_current.pth"),
-                    )
-                    for i, optim in enumerate(optimizers):
-                        torch.save(
-                            optim.state_dict(),
-                            os.path.join(checkpoints_dir, f"optim_{i}_current.pth"),
-                        )
-                    if summary_fn is not None:
-                        summary_fn(
-                            model,
-                            model_input,
-                            gt,
-                            loss_summaries,
-                            model_output,
-                            writer,
-                            total_steps,
-                            "train_",
-                        )
-
-                for optim in optimizers:
-                    optim.zero_grad()
-                train_loss.backward()
-
-                if gpus > 1:
-                    average_gradients(model)
-
-                if clip_grad:
-                    if isinstance(clip_grad, bool):
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            if rank == 0:
+                if os.path.exists(model_dir):
+                    if overwrite:
+                        shutil.rmtree(model_dir)
                     else:
-                        torch.nn.utils.clip_grad_norm_(
-                            model.parameters(), max_norm=clip_grad
+                        val = input(
+                            "The model directory %s exists. Overwrite? (y/n)"
+                            % model_dir
+                        )
+                        if val == "y" or overwrite:
+                            shutil.rmtree(model_dir)
+
+                os.makedirs(model_dir)
+
+                summaries_dir = os.path.join(model_dir, "summaries")
+                util.cond_mkdir(summaries_dir)
+
+                checkpoints_dir = os.path.join(model_dir, "checkpoints")
+                util.cond_mkdir(checkpoints_dir)
+
+                writer = SummaryWriter(summaries_dir, flush_secs=10)
+
+            total_steps = 0
+            with tqdm(total=len(train_dataloader) * self.opt.num_epochs) as pbar:
+                for epoch in range(self.opt.num_epochs):
+                    if (
+                        not epoch % self.opt.epochs_til_checkpoint
+                        and epoch
+                        and rank == 0
+                    ):
+                        torch.save(
+                            self.model.state_dict(),
+                            os.path.join(
+                                checkpoints_dir,
+                                "model_epoch_%04d_iter_%06d.pth" % (epoch, total_steps),
+                            ),
                         )
 
-                for optim in optimizers:
-                    optim.step()
-                del train_loss
+                    for model_input, gt in train_dataloader:
+                        if self.opt.device != "cpu":
+                            model_input = util.dict_to_gpu(model_input)
+                            gt = util.dict_to_gpu(gt)
 
-                if rank == 0:
-                    pbar.update(1)
-
-                if not total_steps % steps_til_summary and rank == 0:
-                    print(
-                        ", ".join(
-                            [f"Epoch {epoch}"]
-                            + [f"{name} {loss.mean()}" for name, loss in losses.items()]
+                        model_output = self.model(model_input)
+                        losses, _ = self.loss_fn(
+                            model_output, gt, model=self.model
                         )
-                    )
 
-                    if val_dataloader is not None:
-                        print("Running validation set...")
-                        with torch.no_grad():
-                            model.eval()
-                            val_losses = defaultdict(list)
-                            for val_i, (model_input, gt) in enumerate(val_dataloader):
-                                if device == "gpu":
-                                    model_input = util.dict_to_gpu(model_input)
-                                    gt = util.dict_to_gpu(gt)
-
-                                model_output = model(model_input, val=True)
-                                val_loss, val_loss_smry = val_loss_fn(
-                                    model_output, gt, val=True, model=model
-                                )
-
-                                for name, value in val_loss.items():
-                                    val_losses[name].append(value)
-
-                                if val_i == batches_per_validation:
-                                    break
-
-                            for loss_name, loss in val_losses.items():
-                                single_loss = np.mean(
-                                    np.concatenate(
-                                        [l.reshape(-1).cpu().numpy() for l in loss],
-                                        axis=0,
-                                    )
-                                )
-
-                                if rank == 0:
-                                    writer.add_scalar(
-                                        "val_" + loss_name, single_loss, total_steps
-                                    )
+                        train_loss = 0.0
+                        for loss_name, loss in losses.items():
+                            single_loss = loss.mean()
 
                             if rank == 0:
-                                if val_summary_fn is not None:
-                                    val_summary_fn(
-                                        model,
-                                        model_input,
-                                        gt,
-                                        val_loss_smry,
-                                        model_output,
-                                        writer,
-                                        total_steps,
-                                        "val_",
-                                    )
+                                writer.add_scalar(loss_name, single_loss, total_steps)
+                            train_loss += single_loss
 
-                        model.train()
+                        if rank == 0:
+                            writer.add_scalar(
+                                "total_train_loss", train_loss, total_steps
+                            )
 
-                if (
-                    (iters_til_checkpoint is not None)
-                    and (not total_steps % iters_til_checkpoint)
-                    and rank == 0
-                ):
+                        if not total_steps % self.opt.steps_til_summary and rank == 0:
+                            torch.save(
+                                self.model.state_dict(),
+                                os.path.join(checkpoints_dir, "model_current.pth"),
+                            )
+                            for i, optim in enumerate(self.optimizers):
+                                torch.save(
+                                    optim.state_dict(),
+                                    os.path.join(
+                                        checkpoints_dir, f"optim_{i}_current.pth"
+                                    ),
+                                )
+                            if self.summary_fn is not None:
+                                self.summary_fn(
+                                    model_input,
+                                    gt,
+                                    model_output,
+                                    writer,
+                                    total_steps,
+                                    "train_",
+                                )
+
+                        for optim in self.optimizers:
+                            optim.zero_grad()
+                        train_loss.backward()
+
+                        if self.opt.gpus > 1:
+                            self.average_gradients()
+
+                        for optim in self.optimizers:
+                            optim.step()
+                        del train_loss
+
+                        if rank == 0:
+                            pbar.update(1)
+
+                        if not total_steps % self.opt.steps_til_summary and rank == 0:
+                            print(
+                                ", ".join(
+                                    [f"Epoch {epoch}"]
+                                    + [
+                                        f"{name} {loss.mean()}"
+                                        for name, loss in losses.items()
+                                    ]
+                                )
+                            )
+
+                            if val_dataloader is not None:
+                                print("Running validation set...")
+                                with torch.no_grad():
+                                    self.model.eval()
+                                    val_losses = defaultdict(list)
+                                    for val_i, (model_input, gt) in enumerate(
+                                        val_dataloader
+                                    ):
+                                        if self.opt.device != "cpu":
+                                            model_input = util.dict_to_gpu(model_input)
+                                            gt = util.dict_to_gpu(gt)
+
+                                        model_output = self.model(model_input, val=True)
+                                        val_loss, val_loss_smry = self.val_loss_fn(
+                                            model_output, gt, val=True, model=self.model
+                                        )
+
+                                        for name, value in val_loss.items():
+                                            val_losses[name].append(value)
+
+                                        if val_i == self.opt.batches_per_validation:
+                                            break
+
+                                    for loss_name, loss in val_losses.items():
+                                        single_loss = np.mean(
+                                            np.concatenate(
+                                                [
+                                                    l.reshape(-1).cpu().numpy()
+                                                    for l in loss
+                                                ],
+                                                axis=0,
+                                            )
+                                        )
+
+                                        if rank == 0:
+                                            writer.add_scalar(
+                                                "val_" + loss_name,
+                                                single_loss,
+                                                total_steps,
+                                            )
+
+                                self.model.train()
+
+                        if (
+                            (self.opt.iters_til_checkpoint is not None)
+                            and (not total_steps % self.opt.iters_til_checkpoint)
+                            and rank == 0
+                        ):
+                            torch.save(
+                                self.model.state_dict(),
+                                os.path.join(
+                                    checkpoints_dir,
+                                    "model_epoch_%04d_iter_%06d.pth"
+                                    % (epoch, total_steps),
+                                ),
+                            )
+
+                        total_steps += 1
+                        if max_steps is not None and total_steps == max_steps:
+                            break
+
+                    if max_steps is not None and total_steps == max_steps:
+                        break
+
+                if rank == 0:
                     torch.save(
-                        model.state_dict(),
-                        os.path.join(
-                            checkpoints_dir,
-                            "model_epoch_%04d_iter_%06d.pth" % (epoch, total_steps),
-                        ),
+                        self.model.state_dict(),
+                        os.path.join(checkpoints_dir, "model_final.pth"),
                     )
 
-                total_steps += 1
-                if max_steps is not None and total_steps == max_steps:
-                    break
-
-            if max_steps is not None and total_steps == max_steps:
-                break
-
-        if rank == 0:
-            torch.save(
-                model.state_dict(), os.path.join(checkpoints_dir, "model_final.pth")
+    def train(self, gpu=0):
+        if self.opt.gpus > 1:
+            dist.init_process_group(
+                backend="nccl",
+                init_method="tcp://localhost:1492",
+                world_size=self.opt.gpus,
+                rank=gpu,
             )
 
-        return model, optimizers
+        self.model.to(self.opt.device)
+        if self.opt.checkpoint_path is not None:
+            state_dict = torch.load(self.opt.checkpoint_path)
+            self.model.load_state_dict(state_dict)
+
+        if self.opt.gpus > 1:
+            self.sync_model()
+
+        self.summary_fn = util.img_summaries
+        self.dataloader_iters = (10000, 500000)
+        self.dataloader_params = (
+            (self.opt.sidelens[0], self.opt.batch_sizes[0], None),
+            (self.opt.sidelens[1], self.opt.batch_sizes[1], None),
+        )
+
+        self.train_step(gpu)
