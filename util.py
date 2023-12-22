@@ -323,8 +323,8 @@ def img_summaries(
     trgt_imgs = ground_truth["rgb"]
     indices = model_input["query"]["instance_idx"]
 
-    predictions = util.flatten_first_two(predictions)
-    trgt_imgs = util.flatten_first_two(trgt_imgs)
+    predictions = flatten_first_two(predictions)
+    trgt_imgs = flatten_first_two(trgt_imgs)
 
     with torch.no_grad():
         if "context" in model_input and model_input["context"]:
@@ -332,8 +332,8 @@ def img_summaries(
                 model_input["context"]["rgb"]
                 * model_input["context"]["mask"][..., None]
             )
-            context_images = util.lin2img(
-                util.flatten_first_two(context_images), image_resolution=img_shape
+            context_images = lin2img(
+                flatten_first_two(context_images), image_resolution=img_shape
             )
             writer.add_image(
                 prefix + "context_images",
@@ -346,7 +346,7 @@ def img_summaries(
             )
 
         output_vs_gt = torch.cat((predictions, trgt_imgs), dim=0)
-        output_vs_gt = util.lin2img(output_vs_gt, image_resolution=img_shape)
+        output_vs_gt = lin2img(output_vs_gt, image_resolution=img_shape)
         writer.add_image(
             prefix + "output_vs_gt",
             torchvision.utils.make_grid(output_vs_gt, scale_each=False, normalize=True)
@@ -364,3 +364,63 @@ def img_summaries(
 
         writer.add_scalar(prefix + "idx_min", indices.min(), iter)
         writer.add_scalar(prefix + "idx_max", indices.max(), iter)
+
+
+def get_psnr(p, trgt):
+    p = lin2img(p.squeeze(), mode="np")
+    trgt = lin2img(trgt.squeeze(), mode="np")
+
+    p = detach_all(p)
+    trgt = detach_all(trgt)
+
+    p = (p / 2.0) + 0.5
+    p = np.clip(p, a_min=0.0, a_max=1.0)
+    trgt = (trgt / 2.0) + 0.5
+
+    ssim = skimage.metrics.structural_similarity(
+        p, trgt, multichannel=True, data_range=1, win_size=7, channel_axis=2
+    )
+    psnr = skimage.metrics.structural_similarity(
+        p, trgt, data_range=1, win_size=7, channel_axis=2
+    )
+
+    return psnr, ssim
+
+
+def test_results(log_dir, model, dataset, save_first_n, gpu_avail):
+    psnrs = []
+    with torch.no_grad():
+        for i in range(len(dataset)):
+            print(f"Object {i:04d}")
+
+            dummy_query = dataset[i][0]
+            instance_name = dummy_query["instance_name"]
+
+            if i < save_first_n:
+                instance_dir = log_dir / f"{instance_name}"
+                instance_dir.mkdir(exist_ok=True, parents=True)
+
+            for j, query in enumerate(dataset[i]):
+                model_input = assemble_model_input(query, query, gpu_avail)
+                model_output = model(model_input)
+
+                # Obtaining the generated image and the ground truth image
+                out_dict = {}
+                out_dict["rgb"] = model_output["rgb"]
+                out_dict["gt_rgb"] = model_input["query"]["rgb"]
+
+                psnr, ssim = get_psnr(out_dict["rgb"], out_dict["gt_rgb"])
+                psnrs.append((psnr, ssim))
+
+                # Saving the images in the logging folder
+                if i < save_first_n:
+                    img = convert_image(out_dict["gt_rgb"], "rgb")
+                    cv2.imwrite(str(instance_dir / f"{j:06d}_gt.png"), img)
+                    img = convert_image(out_dict["rgb"], "rgb")
+                    cv2.imwrite(str(instance_dir / f"{j:06d}.png"), img)
+
+            print("Mean PSNRs", np.mean(np.array(psnrs), axis=0))
+
+    with open(os.path.join(log_dir, "results.txt"), "w") as out_file:
+        mean = np.mean(psnrs, axis=0)
+        out_file.write(f"{mean[0]} PSRN {mean[1]} SSIM")

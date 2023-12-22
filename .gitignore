@@ -128,5 +128,5 @@ textual_inversion/
 test.py
 
 # LFN Logs
-.lfn_logs/
-.lfn_results/
+lfn_logs/
+lfn_results/

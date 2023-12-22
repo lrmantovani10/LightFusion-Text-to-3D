@@ -133,11 +133,12 @@ def generate_images(
     style=None,
     device="cuda",
     initial_negative_prompt=None,
+    image_folder="image_data/",
+    num_images=2,
 ):
     width = 4 * height
     pipe = build_pipe(device)
 
-    image_folder = "image_data/"
     util.cond_mkdir(image_folder)
 
     generated_images_folder = image_folder + "generated_images/"
@@ -173,15 +174,6 @@ def generate_images(
         (0, 0, 90),
     ]
 
-    hdf5_filename = image_folder + original_prompt + ".hdf5"
-
-    # Latent generation with a fixed seed so that we ensure that
-    # the generated images are similar
-    # For a random seed, run the code below. The one I am using works well for a single image generation with a blank background
-    # seed = generator.seed()
-    seed = 2457887243
-    print("Seed used: " + str(seed))
-    generator = torch.Generator(device=device).manual_seed(seed)
     gen_folder_num = len(
         [
             k
@@ -190,62 +182,21 @@ def generate_images(
         ]
     )
 
-    save_path = generated_images_folder + str(gen_folder_num + 1) + ".png"
-
-    latents = torch.randn(
-        (1, pipe.unet.config.in_channels, height // 8, width // 8),
-        generator=generator,
-        device=device,
-    )
-
     poses = generate_poses()
     print("Final prompt: ", prompt)
-    image = pipe(
-        prompt,
-        poses,
-        height=height,
-        width=width,
-        num_inference_steps=num_steps,
-        negative_prompt=negative_prompt,
-        latents=latents,
-        guidance_scale=guidance_scale,
-    ).images[0]
 
-    image.save(save_path)
-    img_array = np.array(image)
-
-    # Extract four poses from the image
-    img_arrays = []
-    pose_arrays = []
     tiles_folder = image_folder + "individual_images/"
-    tiles_folder_specific = tiles_folder + clean_prompt + "/"
     util.cond_mkdir(tiles_folder)
-    util.cond_mkdir(tiles_folder_specific)
-    num_poses = len(rotations)
-    for i in range(num_poses):
-        # The first tile normally extends a bit further
-        if i == 0:
-            k = width / 30
-        elif i == 1:
-            k = width / 70
-        else:
-            k = 0
-        effective_width = int((width // num_poses) + k)
-        tile = img_array[
-            :,
-            i * effective_width : (i + 1) * effective_width,
-            :,
-        ]
-        if i < 2:
-            tile = cv2.resize(
-                tile,
-                (width, height),
-                interpolation=cv2.INTER_NEAREST,
-            )
-        img_arrays.append(tile)
-        image_pose = generate_extrinsics(rotations[i])
-        pose_arrays.append(image_pose)
-        Image.fromarray(tile).save(tiles_folder_specific + str(i + 1) + ".png")
+    prompt_tile_folder = os.path.join(tiles_folder, clean_prompt)
+    util.cond_mkdir(prompt_tile_folder)
+    tiles_len = len(os.listdir(prompt_tile_folder))
+    hdf5_filename_original = image_folder + original_prompt + ".hdf5"
+    hdf5_filename_last = image_folder + original_prompt + "_generated.hdf5"
+    hdf5_filename = hdf5_filename_original
+
+    extrinsics = [generate_extrinsics(rotations[j]) for j in range(len(rotations))]
+    final_width = int(width // num_poses)
+    image_intrinsics = generate_intrinsics(final_width, height)
 
     # Check how many images with the same prompt have been generated before
     try:
@@ -254,20 +205,78 @@ def generate_images(
     except:
         num_equal_images = 0
 
-    with h5py.File(hdf5_filename, "a") as file:
-        group = file.create_group("instance_" + str(num_equal_images + 1))
+    for i in range(num_images):
+        if i == len(num_images) - 1:
+            hdf5_filename = hdf5_filename_last
+            num_equal_images = 0
 
-        print("Generating camera intrinsics")
-        final_width = int(width // num_poses)
-        image_intrinsics = generate_intrinsics(final_width, height)
+        seed = generator.seed()
+        print("Seed used: " + str(seed))
+        generator = torch.Generator(device=device).manual_seed(seed)
+        gen_folder_num += 1
+        save_path = generated_images_folder + str(gen_folder_num) + ".png"
 
-        rgbs_data = group.create_group("rgb")
-        poses_data = group.create_group("pose")
-        group.create_dataset("intrinsics.txt", data=image_intrinsics)
+        latents = torch.randn(
+            (1, pipe.unet.config.in_channels, height // 8, width // 8),
+            generator=generator,
+            device=device,
+        )
 
-        for i in range(num_poses):
-            poses_data.create_dataset(str(i + 1) + ".txt", data=pose_arrays[i])
-            rgbs_data.create_dataset(str(i + 1) + ".png", data=img_arrays[i])
+        image = pipe(
+            prompt,
+            poses,
+            height=height,
+            width=width,
+            num_inference_steps=num_steps,
+            negative_prompt=negative_prompt,
+            latents=latents,
+            guidance_scale=guidance_scale,
+        ).images[0]
 
-        print("Images saved to " + image_folder)
-        return hdf5_filename
+        image.save(save_path)
+        img_array = np.array(image)
+
+        # Extract four poses from the image
+        img_arrays = []
+        pose_arrays = []
+        tiles_len += 1
+        num_poses = len(rotations)
+        tiles_folder_specific = os.path.join(tiles_folder, clean_prompt, str(tiles_len))
+        util.cond_mkdir(tiles_folder_specific)
+        for j in range(num_poses):
+            # The first tile normally extends a bit further
+            if j == 0:
+                k = width / 30
+            elif j == 1:
+                k = width / 70
+            else:
+                k = 0
+            effective_width = int((width // num_poses) + k)
+            tile = img_array[
+                :,
+                j * effective_width : (j + 1) * effective_width,
+                :,
+            ]
+            if j < 2:
+                tile = cv2.resize(
+                    tile,
+                    (width, height),
+                    interpolation=cv2.INTER_NEAREST,
+                )
+            img_arrays.append(tile)
+            pose_arrays.append(extrinsics[j])
+            Image.fromarray(tile).save(tiles_folder_specific + str(j + 1) + ".png")
+
+        num_equal_images += 1
+        with h5py.File(hdf5_filename, "a") as file:
+            group = file.create_group("instance_" + str(num_equal_images))
+            group.create_dataset("intrinsics.txt", data=image_intrinsics)
+            rgbs_data = group.create_group("rgb")
+            poses_data = group.create_group("pose")
+
+            for t in range(num_poses):
+                poses_data.create_dataset(str(t + 1) + ".txt", data=pose_arrays[t])
+                rgbs_data.create_dataset(str(t + 1) + ".png", data=img_arrays[t])
+
+    print("Images saved to " + image_folder)
+    return hdf5_filename_original
