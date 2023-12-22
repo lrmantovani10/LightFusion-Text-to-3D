@@ -50,7 +50,7 @@ class Trainer:
             train_dataset,
             batch_size=batch_size,
             shuffle=True,
-            drop_last=True,
+            drop_last=self.opt.drop_last,
             num_workers=0,
         )
         return train_loader
@@ -93,11 +93,7 @@ class Trainer:
             total_steps = 0
             with tqdm(total=len(train_dataloader) * self.opt.num_epochs) as pbar:
                 for epoch in range(self.opt.num_epochs):
-                    if (
-                        not epoch % self.opt.epochs_til_checkpoint
-                        and epoch
-                        and rank == 0
-                    ):
+                    if not epoch % self.opt.epochs_til_ckpt and epoch and rank == 0:
                         torch.save(
                             self.model.state_dict(),
                             os.path.join(
@@ -105,16 +101,13 @@ class Trainer:
                                 "model_epoch_%04d_iter_%06d.pth" % (epoch, total_steps),
                             ),
                         )
-
                     for model_input, gt in train_dataloader:
                         if self.opt.device != "cpu":
                             model_input = util.dict_to_gpu(model_input)
                             gt = util.dict_to_gpu(gt)
 
                         model_output = self.model(model_input)
-                        losses, _ = self.loss_fn(
-                            model_output, gt, model=self.model
-                        )
+                        losses = self.loss_fn(model_output, gt)
 
                         train_loss = 0.0
                         for loss_name, loss in losses.items():
@@ -220,8 +213,8 @@ class Trainer:
                                 self.model.train()
 
                         if (
-                            (self.opt.iters_til_checkpoint is not None)
-                            and (not total_steps % self.opt.iters_til_checkpoint)
+                            (self.opt.iters_til_ckpt is not None)
+                            and (not total_steps % self.opt.iters_til_ckpt)
                             and rank == 0
                         ):
                             torch.save(

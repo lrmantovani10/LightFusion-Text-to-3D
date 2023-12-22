@@ -106,7 +106,7 @@ def multigpu_train(gpu, opt, cache):
     ]
     optimizers = [torch.optim.Adam(lr=opt.lr, params=[p for _, p in latent_params])]
 
-    def create_dataloader_callback(sidelength, batch_size, query_sparsity):
+    def create_dataloader_callback(sidelength, batch_size):
         train_dataset = hdf5_dataio.SceneClassDataset(
             num_context=0,
             num_trgt_samples=1,
@@ -130,7 +130,7 @@ def multigpu_train(gpu, opt, cache):
         dataloader_callback=create_dataloader_callback,
         # dataloader_iters=(500000,),
         dataloader_iters=(500,),
-        dataloader_params=((opt.sidelen, opt.batch_size, None),),
+        dataloader_params=((opt.sidelen, opt.batch_size),),
         epochs=opt.num_epochs,
         lr=opt.lr,
         steps_til_summary=opt.steps_til_summary,

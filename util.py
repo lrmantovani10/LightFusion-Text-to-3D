@@ -1,4 +1,4 @@
-import imageio
+from PIL import Image
 import torch.nn.functional as F
 import geometry
 import os
@@ -11,12 +11,13 @@ import matplotlib
 import util
 import torchvision
 import skimage
+import cv2
 
 
 def load_rgb_hdf5(instance_ds, key):
     rgb_ds = instance_ds["rgb"]
-    s = rgb_ds[key][...].tostring()
-    img = s.decode("utf-8")
+    img_arr = np.array(rgb_ds[key][:])
+    img = resize_img(Image.fromarray(img_arr))
     img = skimage.img_as_float32(img)
 
     # Normalization
@@ -28,21 +29,15 @@ def load_rgb_hdf5(instance_ds, key):
 
 def load_pose_hdf5(instance_ds, key):
     pose_ds = instance_ds["pose"]
-    s = pose_ds[key][...].tostring()
-    s = s.decode("utf-8")
-    lines = s.splitlines()
-    lines = [[x[0], x[1], x[2], x[3]] for x in (x.split(" ") for x in lines[:4])]
-    return np.asarray(lines).astype(np.float32).squeeze()
+    extrinsics = np.array(pose_ds[key][:])
+    return extrinsics.astype(np.float32).squeeze()
 
 
 def parse_intrinsics_hdf5(raw_data, trgt_sidelength=None, invert_y=False):
-    s = raw_data[...].tostring()
-    s = s.decode("utf-8")
+    i_arr = np.array(raw_data)
 
-    lines = s.split("\n")
-
-    f, cx, cy = map(float, lines[0].split())
-    height, width = map(float, lines[1].split())
+    f, cx, cy = i_arr[:3]
+    height, width = i_arr[3:]
 
     if trgt_sidelength is not None:
         cx = cx / width * trgt_sidelength
@@ -60,6 +55,40 @@ def parse_intrinsics_hdf5(raw_data, trgt_sidelength=None, invert_y=False):
     )
 
     return full_intrinsic
+
+
+def getMedianImageChannels(im):
+    b, g, r = cv2.split(im)
+    # Remove zeros
+    b = b[b != 0]
+    g = g[g != 0]
+    r = r[r != 0]
+    # median values
+    b_median = np.median(b)
+    r_median = np.median(r)
+    g_median = np.median(g)
+    return r_median, g_median, b_median
+
+
+def resize_img(img):
+    image_size = img.size
+    width = image_size[0]
+    height = image_size[1]
+
+    if width != height:
+        bigside = width if width > height else height
+        r, g, b = [int(out) for out in getMedianImageChannels(np.array(img))]
+        background = Image.new("RGB", (bigside, bigside), (r, g, b))
+        offset = (
+            int(round(((bigside - width) / 2), 0)),
+            int(round(((bigside - height) / 2), 0)),
+        )
+
+        background.paste(img, offset)
+        return background
+
+    else:
+        return img
 
 
 def gradient(y, x, grad_outputs=None, create_graph=True):
@@ -161,7 +190,7 @@ def light_field_depth_map(plucker_coords, cam2world, light_field_fn):
     d_prim = F.normalize(d_prim, dim=-1)
 
     dcdsts = []
-    for i in range(5):
+    for _ in range(5):
         st = (
             ((torch.rand_like(plucker_coords[..., :2]) - 0.5) * 1e-2)
             .requires_grad_(True)
@@ -190,7 +219,6 @@ def light_field_depth_map(plucker_coords, cam2world, light_field_fn):
     all_depth_estimates[torch.abs(dcdsts.sum(dim=-1)) < 5] = 0
     all_depth_estimates[all_depth_estimates < 0] = 0.0
 
-    dcdsts_var = torch.std(dcdsts.norm(dim=-1, keepdim=True), dim=0, keepdim=True)
     depth_var = torch.std(all_depth_estimates, dim=0, keepdim=True)
 
     d = D * dcdt / (dcds + dcdt)
@@ -238,36 +266,30 @@ def glob_imgs(path):
     return imgs
 
 
-def visualize_data(filepath):
-    with h5py.File(filepath, "r") as file:
-        # Setting the dataset to the first entry in the file
-        for name, item in file.items():
-            print(name, item)
-            dataset = item
-            break
+def visualize_data(filepath, instance_num):
+    file = h5py.File(
+        filepath,
+        "r",
+    )
 
-        # Viewing the first pose
-        pose = dataset["pose"][()]
-        pose = pose.decode("utf-8")
-        print("Pose\n", pose)
+    instance = file["instance_" + str(instance_num)]
+    color_keys = sorted(list(instance["rgb"].keys()))
+    pose_keys = sorted(list(instance["pose"].keys()))
 
-        # Displaying the first image
-        rgb = dataset["rgb"][()]
+    img = np.array(load_rgb_hdf5(instance, color_keys[0]))
+    img = skimage.img_as_ubyte(img)
+    img = Image.fromarray(img)
+    img.show()
 
-        # Display the image
-        img = imageio.fromarray(rgb)
-        img.show()
-
-        # Display intrinsics data
-        intrinsics = dataset["intrinsics.txt"]
-        intrinsics = intrinsics[()]
-        intrinsics = intrinsics.decode("utf-8")
-        print("Intrinsics\n", intrinsics)
+    print(load_pose_hdf5(instance, pose_keys[0]))
+    print(parse_intrinsics_hdf5(instance["intrinsics.txt"]))
 
 
-# Testing data visualization with a simple "dragon.hdf5" example
-def test_examples():
-    visualize_data("data/dragon.hdf5")
+# Testing with a custom example I made
+# You might notice that the lighting is a bit darker here -- this is
+# because of the normalization step in the load_rgb_hdf5 function
+def test_example():
+    visualize_data("image_data/cyberpunk_mercenary.hdf5", 1)
 
 
 def image_loss(model_out, gt, mask=None):
@@ -280,7 +302,7 @@ class LFLoss:
         self.l2_weight = l2_weight
         self.reg_weight = reg_weight
 
-    def __call__(self, model_out, gt, model=None, val=False):
+    def __call__(self, model_out, gt):
         loss_dict = {}
         loss_dict["img_loss"] = image_loss(model_out, gt)
         loss_dict["reg"] = (model_out["z"] ** 2).mean() * self.reg_weight

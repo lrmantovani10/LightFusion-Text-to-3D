@@ -36,42 +36,52 @@ opt.checkpoint_path = None
 opt.batch_sizes = 256, 50
 opt.sidelens = 64, 128
 opt.batches_per_validation = 10
+# Whether to drop the last batch
+opt.drop_last = False
 
-if opt.train == "true":
-    opt.device = torch.device(
-        "cuda"
-        if torch.cuda.is_available()
-        else "mps"
-        if torch.backends.mps.is_available()
-        else "cpu"
-    )
+if __name__ == "__main__":
+    if opt.train == "true":
+        opt.device = (
+            "cuda"
+            if torch.cuda.is_available()
+            else "mps"
+            if torch.backends.mps.is_available()
+            else "cpu"
+        )
+        # For now, ignoring MPS because the PyTorch MPS implementation it is still in development -- this next condition can be removed if the MPS implementation is stable
+        if opt.device == "mps":
+            opt.device = "cpu"
 
-    opt.data_root = generate_images(
-        opt.prompt,
-        style=opt.prompt_style,
-        device=opt.device,
-        initial_negative_prompt=opt.negative_prompt,
-    )
+        # opt.data_root = generate_images(
+        #     opt.prompt,
+        #     style=opt.prompt_style,
+        #     device=opt.device,
+        #     initial_negative_prompt=opt.negative_prompt,
+        # )
+        opt.data_root = "image_data/cyberpunk_mercenary.hdf5"
 
-    num_instances = hdf5_dataio.get_num_instances(opt.data_root)
-    model = models.LFAutoDecoder(
-        latent_dim=256,
-        num_instances=num_instances,
-        parameterization="plucker",
-        network=opt.network,
-        conditioning=opt.conditioning,
-    ).to(opt.device)
+        num_instances = hdf5_dataio.get_num_instances(opt.data_root)
+        model = models.LFAutoDecoder(
+            latent_dim=256,
+            num_instances=num_instances,
+            parameterization="plucker",
+            network=opt.network,
+            conditioning=opt.conditioning,
+        )
 
-    loss_fn = val_loss_fn = util.LFLoss(reg_weight=1)
-    optimizers = [torch.optim.Adam(lr=opt.lr, params=model.parameters())]
-    trainer = Trainer(model, optimizers, loss_fn, val_loss_fn, opt, rank=0)
+        loss_fn = val_loss_fn = util.LFLoss(reg_weight=1)
+        optimizers = [torch.optim.Adam(lr=opt.lr, params=model.parameters())]
+        trainer = Trainer(model, optimizers, loss_fn, val_loss_fn, opt, rank=0)
 
-    manager = Manager()
-    shared_dict = manager.dict()
-    opt.cache = shared_dict
+        manager = Manager()
+        shared_dict = manager.dict()
+        opt.cache = shared_dict
 
-    mp.spawn(trainer.train, nprocs=opt.gpus)
+        if opt.gpus > 1:
+            mp.spawn(trainer.train, nprocs=opt.gpus, join=True)
+        else:
+            trainer.train(0)
 
-# Recreation / Testing phase
-else:
-    pass
+    # Recreation / Testing phase
+    else:
+        pass
