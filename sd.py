@@ -134,6 +134,7 @@ def generate_images(
     device="cuda",
     initial_negative_prompt=None,
     image_folder="image_data/",
+    final_width=128,
     num_images=2,
 ):
     width = 4 * height
@@ -195,6 +196,7 @@ def generate_images(
     hdf5_filename = hdf5_filename_original
 
     extrinsics = [generate_extrinsics(rotations[j]) for j in range(len(rotations))]
+    num_poses = len(rotations)
     final_width = int(width // num_poses)
     image_intrinsics = generate_intrinsics(final_width, height)
 
@@ -206,13 +208,14 @@ def generate_images(
         num_equal_images = 0
 
     for i in range(num_images):
-        if i == len(num_images) - 1:
+        if i == num_images - 1:
             hdf5_filename = hdf5_filename_last
             num_equal_images = 0
 
+        generator = torch.Generator(device=device)
         seed = generator.seed()
         print("Seed used: " + str(seed))
-        generator = torch.Generator(device=device).manual_seed(seed)
+        generator = generator.manual_seed(seed)
         gen_folder_num += 1
         save_path = generated_images_folder + str(gen_folder_num) + ".png"
 
@@ -240,7 +243,6 @@ def generate_images(
         img_arrays = []
         pose_arrays = []
         tiles_len += 1
-        num_poses = len(rotations)
         tiles_folder_specific = os.path.join(tiles_folder, clean_prompt, str(tiles_len))
         util.cond_mkdir(tiles_folder_specific)
         for j in range(num_poses):
@@ -257,15 +259,14 @@ def generate_images(
                 j * effective_width : (j + 1) * effective_width,
                 :,
             ]
-            if j < 2:
-                tile = cv2.resize(
-                    tile,
-                    (width, height),
-                    interpolation=cv2.INTER_NEAREST,
-                )
+            Image.fromarray(tile).save(tiles_folder_specific + str(j + 1) + ".png")
+            tile = cv2.resize(
+                tile,
+                (final_width, final_width),
+                interpolation=cv2.INTER_NEAREST,
+            )
             img_arrays.append(tile)
             pose_arrays.append(extrinsics[j])
-            Image.fromarray(tile).save(tiles_folder_specific + str(j + 1) + ".png")
 
         num_equal_images += 1
         with h5py.File(hdf5_filename, "a") as file:

@@ -397,8 +397,8 @@ def test_results(log_dir, model, dataset, save_first_n, gpu_avail):
             instance_name = dummy_query["instance_name"]
 
             if i < save_first_n:
-                instance_dir = log_dir / f"{instance_name}"
-                instance_dir.mkdir(exist_ok=True, parents=True)
+                instance_dir = log_dir + f"{instance_name}"
+                os.makedirs(instance_dir, exist_ok=True)
 
             for j, query in enumerate(dataset[i]):
                 model_input = assemble_model_input(query, query, gpu_avail)
@@ -415,9 +415,9 @@ def test_results(log_dir, model, dataset, save_first_n, gpu_avail):
                 # Saving the images in the logging folder
                 if i < save_first_n:
                     img = convert_image(out_dict["gt_rgb"], "rgb")
-                    cv2.imwrite(str(instance_dir / f"{j:06d}_gt.png"), img)
+                    cv2.imwrite(str(instance_dir + f"{j:06d}_gt.png"), img)
                     img = convert_image(out_dict["rgb"], "rgb")
-                    cv2.imwrite(str(instance_dir / f"{j:06d}.png"), img)
+                    cv2.imwrite(str(instance_dir + f"{j:06d}.png"), img)
 
             print("Mean PSNRs", np.mean(np.array(psnrs), axis=0))
 

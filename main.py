@@ -71,15 +71,15 @@ if __name__ == "__main__":
         opt.checkpoint_path = train_checkpoint_path
     print("PATHS", train_checkpoint_path, test_checkpoint_path, opt.checkpoint_path)
     if opt.train == "true":
-        # opt.data_root = generate_images(
-        #     opt.prompt,
-        #     style=opt.prompt_style,
-        #     device=opt.device,
-        #     initial_negative_prompt=opt.negative_prompt,
-        #     image_folder=opt.image_folder,
-        #     num_images=opt.num_images,
-        # )
-        pass
+        opt.data_root = generate_images(
+            opt.prompt,
+            style=opt.prompt_style,
+            device=opt.device,
+            initial_negative_prompt=opt.negative_prompt,
+            image_folder=opt.image_folder,
+            num_images=opt.num_images,
+            final_width=opt.sidelen,
+        )
     else:
         if not opt.checkpoint_path:
             raise FileNotFoundError(
@@ -88,9 +88,8 @@ if __name__ == "__main__":
                 + ". Please train the model before attempting to generate a 3D reconstruction."
             )
         cleaned_prompt = opt.prompt.lower().replace(" ", "_").replace(".", ",")
-        opt.data_root = opt.image_folder + cleaned_prompt
+        opt.data_root = opt.image_folder + cleaned_prompt + ".hdf5"
 
-    opt.data_root = "image_data/cyberpunk_mercenary.hdf5"
     num_instances = hdf5_dataio.get_num_instances(opt.data_root)
     model = models.LFAutoDecoder(
         latent_dim=256,
@@ -129,16 +128,26 @@ if __name__ == "__main__":
         ]
         optimizers = [torch.optim.Adam(lr=opt.lr, params=[p for _, p in latent_params])]
         trainer = Trainer(model, optimizers, loss_fn, val_loss_fn, opt, rank=0)
-        if opt.gpus > 1:
-            mp.spawn(trainer.train, nprocs=opt.gpus, join=True)
-        else:
-            trainer.train(0)
+
+        ### TESTING
+
+        # if opt.gpus > 1:
+        #     mp.spawn(trainer.train, nprocs=opt.gpus, join=True)
+        # else:
+        #     trainer.train(0)
+
+        ###
 
         # Testing / evaluation Stage
         trainer.model.eval()
 
         print("Loading dataset")
-        opt.data_root = opt.data_root.split(".")[0] + "_generated.hdf5"
+
+        ### TESTING
+        # opt.data_root = opt.data_root.split(".")[0] + "_generated.hdf5"
+        opt.data_root = opt.data_root.split(".")[0] + ".hdf5"
+        ###
+
         dataset = hdf5_dataio.get_instance_datasets_hdf5(
             opt.data_root,
             sidelen=opt.sidelen,
