@@ -197,8 +197,8 @@ def generate_images(
 
     extrinsics = [generate_extrinsics(rotations[j]) for j in range(len(rotations))]
     num_poses = len(rotations)
-    final_width = int(width // num_poses)
-    image_intrinsics = generate_intrinsics(final_width, height)
+    effective_width = int(width // num_poses)
+    image_intrinsics = generate_intrinsics(effective_width, height)
 
     # Check how many images with the same prompt have been generated before
     try:
@@ -259,7 +259,9 @@ def generate_images(
                 j * effective_width : (j + 1) * effective_width,
                 :,
             ]
-            Image.fromarray(tile).save(tiles_folder_specific + str(j + 1) + ".png")
+            Image.fromarray(tile).save(
+                tiles_folder_specific + "/" + str(j + 1) + ".png"
+            )
             tile = cv2.resize(
                 tile,
                 (final_width, final_width),

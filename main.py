@@ -14,6 +14,12 @@ p = configargparse.ArgumentParser()
 p.add_argument("--prompt", type=str, required=True)
 p.add_argument("--negative_prompt", type=str, help="What the image shouldn't be")
 p.add_argument(
+    "--num_images",
+    type=int,
+    help="Number of images generated during the 3D reconstruction process",
+    default=3,
+)
+p.add_argument(
     "--prompt_style", type=str, choices=list(promptStyles.styles.keys()), default=None
 )
 p.add_argument("--train", type=str, choices=["true", "false"], default="true")
@@ -23,7 +29,6 @@ opt.gpus = torch.cuda.device_count()
 opt.network = "relu"
 opt.conditioning = "hyper"
 opt.experiment_name = opt.prompt.replace(" ", "_").replace(".", ",")
-opt.num_images = 3
 opt.lr = 1e-4
 opt.num_epochs = 100
 opt.steps_til_summary = 50
