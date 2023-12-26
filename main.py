@@ -43,7 +43,7 @@ opt.max_num_instances = None
 opt.checkpoint_path = None
 opt.batch_size = 50
 # Side length of the squared images used by the model
-opt.sidelen = 128
+opt.sidelen = 512
 opt.batches_per_validation = 10
 # Whether to drop the last batch
 opt.drop_last = False
@@ -76,15 +76,20 @@ if __name__ == "__main__":
         opt.checkpoint_path = train_checkpoint_path
     print("PATHS", train_checkpoint_path, test_checkpoint_path, opt.checkpoint_path)
     if opt.train == "true":
-        opt.data_root = generate_images(
-            opt.prompt,
-            style=opt.prompt_style,
-            device=opt.device,
-            initial_negative_prompt=opt.negative_prompt,
-            image_folder=opt.image_folder,
-            num_images=opt.num_images,
-            final_width=opt.sidelen,
-        )
+        ##### TESTING
+
+        # opt.data_root = generate_images(
+        #     opt.prompt,
+        #     style=opt.prompt_style,
+        #     device=opt.device,
+        #     initial_negative_prompt=opt.negative_prompt,
+        #     image_folder=opt.image_folder,
+        #     num_images=opt.num_images,
+        #     final_width=opt.sidelen,
+        # )
+        opt.data_root = "image_data/cyberpunk_mercenary_with_a_tech_armor.hdf5"
+
+        #####
     else:
         if not opt.checkpoint_path:
             raise FileNotFoundError(
@@ -134,24 +139,17 @@ if __name__ == "__main__":
         optimizers = [torch.optim.Adam(lr=opt.lr, params=[p for _, p in latent_params])]
         trainer = Trainer(model, optimizers, loss_fn, val_loss_fn, opt, rank=0)
 
-        ### TESTING
-
-        # if opt.gpus > 1:
-        #     mp.spawn(trainer.train, nprocs=opt.gpus, join=True)
-        # else:
-        #     trainer.train(0)
-
-        ###
+        if opt.gpus > 1:
+            mp.spawn(trainer.train, nprocs=opt.gpus, join=True)
+        else:
+            trainer.train(0)
 
         # Testing / evaluation Stage
         trainer.model.eval()
 
         print("Loading dataset")
 
-        ### TESTING
-        # opt.data_root = opt.data_root.split(".")[0] + "_generated.hdf5"
-        opt.data_root = opt.data_root.split(".")[0] + ".hdf5"
-        ###
+        opt.data_root = opt.data_root.split(".")[0] + "_generated.hdf5"
 
         dataset = hdf5_dataio.get_instance_datasets_hdf5(
             opt.data_root,

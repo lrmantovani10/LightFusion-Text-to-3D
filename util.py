@@ -100,20 +100,15 @@ def gradient(y, x, grad_outputs=None, create_graph=True):
     return grad
 
 
-def convert_image(img, type):
-    """Expects single batch dimesion"""
+def convert_image(img):
     img = img.squeeze(0)
-
-    if not "normal" in type:
-        img = detach_all(lin2img(img, mode="np"))
-
-    if "rgb" in type or "normal" in type:
-        img += 1.0
-        img /= 2.0
-    elif type == "depth":
-        img = (img - np.amin(img)) / (np.amax(img) - np.amin(img))
+    img = detach_all(lin2img(img, mode="np"))
+    img = img.squeeze(0)
+    img += 1.0
+    img /= 2.0
     img *= 255.0
     img = np.clip(img, 0.0, 255.0).astype(np.uint8)
+
     return img
 
 
@@ -289,7 +284,7 @@ def visualize_data(filepath, instance_num):
 # You might notice that the lighting is a bit darker here -- this is
 # because of the normalization step in the load_rgb_hdf5 function
 def test_example():
-    visualize_data("image_data/cyberpunk_mercenary.hdf5", 1)
+    visualize_data("image_data/cyberpunk_mercenary_with_a_tech_armor.hdf5", 1)
 
 
 def image_loss(model_out, gt, mask=None):
@@ -414,9 +409,9 @@ def test_results(log_dir, model, dataset, save_first_n, gpu_avail):
 
                 # Saving the images in the logging folder
                 if i < save_first_n:
-                    img = convert_image(out_dict["gt_rgb"], "rgb")
+                    img = convert_image(out_dict["gt_rgb"])
                     cv2.imwrite(str(instance_dir + f"{j:06d}_gt.png"), img)
-                    img = convert_image(out_dict["rgb"], "rgb")
+                    img = convert_image(out_dict["rgb"])
                     cv2.imwrite(str(instance_dir + f"{j:06d}.png"), img)
 
             print("Mean PSNRs", np.mean(np.array(psnrs), axis=0))

@@ -134,7 +134,7 @@ def generate_images(
     device="cuda",
     initial_negative_prompt=None,
     image_folder="image_data/",
-    final_width=128,
+    final_width=512,
     num_images=2,
 ):
     width = 4 * height
