@@ -109,12 +109,6 @@ image_data/
 # lfn outputs
 light_fields/
 
-# torch metadata
-torchmeta/
-
-# Outputs
-**/viewlists/
-
 # SD Testing file
 Content_Generation.ipynb
 

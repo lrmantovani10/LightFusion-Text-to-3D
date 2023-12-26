@@ -3,7 +3,6 @@ import numpy as np
 """Pytorch implementations of hyper-network modules."""
 from torch import nn
 import torch
-from torchmeta.modules import MetaModule, MetaSequential
 import custom_layers
 from collections import OrderedDict
 

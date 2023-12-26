@@ -134,8 +134,7 @@ def generate_images(
     device="cuda",
     initial_negative_prompt=None,
     image_folder="image_data/",
-    final_width=512,
-    num_images=2,
+    num_images=15,
 ):
     width = 4 * height
     pipe = build_pipe(device)
@@ -149,7 +148,7 @@ def generate_images(
     prompt = (
         "(character sheet:1.6) of 1 "
         + prompt.lower()
-        + " blank background, charturnerv2."
+        + " blank white background, charturnerv2."
     )
     if style:
         try:
@@ -197,8 +196,8 @@ def generate_images(
 
     extrinsics = [generate_extrinsics(rotations[j]) for j in range(len(rotations))]
     num_poses = len(rotations)
-    effective_width = int(width // num_poses)
-    image_intrinsics = generate_intrinsics(effective_width, height)
+    final_width = int(width // num_poses)
+    image_intrinsics = generate_intrinsics(final_width, height)
 
     # Check how many images with the same prompt have been generated before
     try:

@@ -17,7 +17,7 @@ p.add_argument(
     "--num_images",
     type=int,
     help="Number of images generated during the 3D reconstruction process",
-    default=3,
+    default=15,
 )
 p.add_argument(
     "--prompt_style", type=str, choices=list(promptStyles.styles.keys()), default=None
@@ -30,8 +30,8 @@ opt.network = "relu"
 opt.conditioning = "hyper"
 opt.experiment_name = opt.prompt.replace(" ", "_").replace(".", ",")
 opt.lr = 1e-4
-opt.num_epochs = 100
-opt.steps_til_summary = 50
+opt.num_epochs = 50000
+opt.steps_til_summary = 200
 opt.epochs_til_ckpt = 10
 opt.iters_til_ckpt = 10000
 opt.logging_root = "lfn_logs/"
@@ -41,7 +41,7 @@ opt.num_trgt_samples = 1
 opt.max_num_instances = None
 # If you have a trained model, set this to the path of the file containing the model's weights
 opt.checkpoint_path = None
-opt.batch_size = 50
+opt.batch_size = 40
 # Side length of the squared images used by the model
 opt.sidelen = 512
 opt.batches_per_validation = 10
@@ -76,20 +76,15 @@ if __name__ == "__main__":
         opt.checkpoint_path = train_checkpoint_path
     print("PATHS", train_checkpoint_path, test_checkpoint_path, opt.checkpoint_path)
     if opt.train == "true":
-        ##### TESTING
-
-        # opt.data_root = generate_images(
-        #     opt.prompt,
-        #     style=opt.prompt_style,
-        #     device=opt.device,
-        #     initial_negative_prompt=opt.negative_prompt,
-        #     image_folder=opt.image_folder,
-        #     num_images=opt.num_images,
-        #     final_width=opt.sidelen,
-        # )
-        opt.data_root = "image_data/cyberpunk_mercenary_with_a_tech_armor.hdf5"
-
-        #####
+        opt.data_root = generate_images(
+            opt.prompt,
+            opt.sidelen,
+            style=opt.prompt_style,
+            device=opt.device,
+            initial_negative_prompt=opt.negative_prompt,
+            image_folder=opt.image_folder,
+            num_images=opt.num_images,
+        )
     else:
         if not opt.checkpoint_path:
             raise FileNotFoundError(
