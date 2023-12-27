@@ -109,14 +109,8 @@ image_data/
 # lfn outputs
 light_fields/
 
-# SD Testing file
-Content_Generation.ipynb
-
 # DS_Store
 .DS_Store
-
-# Textual Inversions
-textual_inversion/
 
 # Testing file -- used to test specific functions
 test.py
@@ -124,3 +118,9 @@ test.py
 # LFN Logs
 lfn_logs/
 lfn_results/
+
+# Google Collab scripts
+google_collab_scripts/
+
+# CharTurner
+charturnerv2.pt

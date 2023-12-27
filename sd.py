@@ -11,7 +11,7 @@ controlnet_name = "fusing/stable-diffusion-v1-5-controlnet-openpose"
 text_inversion_path = "textual_inversion/charturnerv2.pt"
 poses_path = "textual_inversion/poses.png"
 num_steps = 45
-guidance_scale = 6.5
+guidance_scale = 6
 
 
 def build_pipe(device):
@@ -136,7 +136,6 @@ def generate_images(
     image_folder="image_data/",
     num_images=15,
 ):
-    width = 4 * height
     pipe = build_pipe(device)
 
     util.cond_mkdir(image_folder)
@@ -146,9 +145,9 @@ def generate_images(
     original_prompt = prompt.lower()
 
     prompt = (
-        "(character sheet:1.6) of 1 "
+        "(character sheet:1.6) of "
         + prompt.lower()
-        + " blank white background, charturnerv2."
+        + ", blank white background, charturnerv2."
     )
     if style:
         try:
@@ -156,7 +155,6 @@ def generate_images(
         except:
             print("Prompt style not found. Defaulting to prompt provided.")
 
-    clean_prompt = prompt.replace(" ", "_").replace(".", ",")
     original_prompt = original_prompt.replace(" ", "_").replace(".", ",")
     negative_prompt = (
         "((not full body)), small, gross proportions, bland colors, assymetric measures, unrecognizable distortions, deformed eyes, ((disfigured)), ((bad art)), ((deformed)), ((extra limbs)), (((duplicate))), ((morbid)), ((mutilated)), out of frame, extra fingers, mutated hands, poorly drawn eyes, ((poorly drawn hands)), ((poorly drawn face)), (((mutation))), ((ugly)), blurry, ((bad anatomy)), (((bad proportions))), cloned face, body out of frame, out of frame, bad anatomy, gross proportions, (malformed limbs), ((missing arms)), ((missing legs)), (((extra arms))), (((extra legs))), (fused fingers), (too many fingers), (((long neck))), tiling, poorly drawn, mutated, cross-eye, canvas frame, frame, cartoon, 3d, weird colors"
@@ -187,7 +185,7 @@ def generate_images(
 
     tiles_folder = image_folder + "individual_images/"
     util.cond_mkdir(tiles_folder)
-    prompt_tile_folder = os.path.join(tiles_folder, clean_prompt)
+    prompt_tile_folder = os.path.join(tiles_folder, original_prompt)
     util.cond_mkdir(prompt_tile_folder)
     tiles_len = len(os.listdir(prompt_tile_folder))
     hdf5_filename_original = image_folder + original_prompt + ".hdf5"
@@ -196,6 +194,7 @@ def generate_images(
 
     extrinsics = [generate_extrinsics(rotations[j]) for j in range(len(rotations))]
     num_poses = len(rotations)
+    width = num_poses * height
     final_width = int(width // num_poses)
     image_intrinsics = generate_intrinsics(final_width, height)
 
@@ -242,7 +241,9 @@ def generate_images(
         img_arrays = []
         pose_arrays = []
         tiles_len += 1
-        tiles_folder_specific = os.path.join(tiles_folder, clean_prompt, str(tiles_len))
+        tiles_folder_specific = os.path.join(
+            tiles_folder, original_prompt, str(tiles_len)
+        )
         util.cond_mkdir(tiles_folder_specific)
         for j in range(num_poses):
             # The first tile normally extends a bit further

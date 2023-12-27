@@ -126,7 +126,7 @@ class LightFieldModel(nn.Module):
     def forward(self, input, val=False, compute_depth=False, timing=False):
         out_dict = {}
         query = input["query"]
-        b, n_ctxt = query["uv"].shape[:2]
+        b, _ = query["uv"].shape[:2]
         n_qry, n_pix = query["uv"].shape[1:3]
 
         if not self.fit_single:
