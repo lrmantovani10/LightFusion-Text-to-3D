@@ -60,6 +60,19 @@ Nonetheless, with an efficient tridimensional reconstruction method (LFN) and an
 ## Thanks 🙌
 
 - Sitzmann and Rezchikov et. al, for the incredible work on LFNs available [here](https://www.vincentsitzmann.com/lfns/).
+```
+@inproceedings{sitzmann2021lfns,
+               author = {Sitzmann, Vincent
+                         and Rezchikov, Semon
+                         and Freeman, William T.
+                         and Tenenbaum, Joshua B.
+                         and Durand, Fredo},
+               title = {Light Field Networks: Neural Scene Representations
+                        with Single-Evaluation Rendering},
+               booktitle = {Proc. NeurIPS},
+               year={2021}
+            }
+```
 - Creators of the Stable Diffusion 1.5 model available [here](https://huggingface.co/runwayml/stable-diffusion-v1-5)
 - CivitAI creators of the [CharTurner tool](https://civitai.com/models/3036/charturner-character-turnaround-helper-for-15-and-21)
 - [ControlNet](https://github.com/lllyasviel/ControlNet) creators and contributors
